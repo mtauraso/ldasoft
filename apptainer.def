@@ -1,0 +1,95 @@
+Bootstrap: docker
+From: rockylinux:8.5.20220308
+Stage: devel
+# Note: We are using this because its the base OS used by Hyak compute nodes
+# The idea is that We have the best chances to find slurm modules of the 
+# exact right versions to integrate into the container, and this will make
+# it possible to build off hyak and run on hyak, with minimal scripting
+# done at runtime for things like mpi which requre same version inside and 
+# outside the container 
+
+
+%files
+	# Copy the ldasoft tree into the container
+	${SOURCE_DIR} /src/
+
+%post
+	# Enable EPEL (Extra packages for enterprise linux)
+	# and the powertools/crb repositories
+	sed -i s/enabled=0$/enabled=1/g /etc/yum.repos.d/Rocky-PowerTools.repo
+	dnf -y install epel-release
+	#dnf -y install epel-release 'dnf-command(config-manager)'
+	#crb enable
+	
+	# Install our build deps
+	# TODO: Installing hdf5 and hdf5-devel fixes ldasoft build. 
+	# Open questions: 
+        #           Do we need both at build time? 
+        #           Is it linking against something that will let it use mpi?
+	# TODO: Do we want hdf5-openmpi-static or hdf5-openmpi-devel or both
+	yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5 hdf5-openmpi-devel hdf5-openmpi-static
+	
+	
+	# TODO check version of mpi
+
+	
+	# Build and install MBH from source
+	#
+	# TODO Ergonomics: What is the right place to get MBH from? is git okay, or 
+	# will this typically be a local checkout that we should build the ability 
+	# to specify
+
+	export MBH_GIT="https://github.com/mtauraso/LISA-Massive-Black-Hole.git"
+	export MBH_BRANCH="build-fixup" 
+
+	export PATH="/usr/lib64/openmpi:/usr/lib64/openmpi/bin:${PATH}"
+
+	git clone --branch ${MBH_BRANCH} ${MBH_GIT} /src/mbh
+	cd /src/mbh
+		./install.sh /src/mbh-install
+	cd -
+
+	# Build and install ldasoft
+	# Tell ldadoft where mbh is
+	export CMAKE_PREFIX_PATH="/src/mbh-install/:${CMAKE_PREFIX_PATH}"
+	cd /src/ldasoft
+		./install.sh /src/ldasoft-install
+	cd -
+
+Bootstrap: docker
+From: rockylinux:8.5.20220308
+Stage: final
+# TODO figure out how MPI binding will really work
+
+%setup
+# TODO create mountpoints for MPI binding
+
+%files from devel
+	/src/ldasoft-install /src/
+	/src/ldasoft /src/
+	/src/mbh /src/
+	/src/mbh-install /src/
+
+%post
+	# Enable EPEL (Extra packages for enterprise linux)
+	# and the powertools/crb repositories
+	sed -i s/enabled=0$/enabled=1/g /etc/yum.repos.d/Rocky-PowerTools.repo
+	dnf -y install epel-release
+	#dnf -y install epel-release 'dnf-command(config-manager)'
+	#crb enable
+	
+	# Install our runtime deps
+	yum -y install gsl openmpi hdf5 
+	# yum -y install hdf5-openmpi 
+	# TODO: Do we want to install mpitests-openmpi ?
+	# TODO Do we need: hdf5-openmpi ?
+
+
+# We assume $MPI_DIR is set on invocation and is bound to the version of MPI that the container was built with
+# There is currently no check of this assumption at runtime or at build time
+%environment
+	export MPI_DIR="/usr/lib64/openmpi"
+	export PATH="$MPI_DIR/bin:$PATH"
+	export LD_LIBRARY_PATH="$MPI_DIR/lib:$LD_LIBRARY_PATH"
+
+
