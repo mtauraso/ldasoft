@@ -1,12 +1,21 @@
 Bootstrap: docker
 From: rockylinux:8.5.20220308
-Stage: devel
 # Note: We are using this because its the base OS used by Hyak compute nodes
 # The idea is that We have the best chances to find slurm modules of the 
 # exact right versions to integrate into the container, and this will make
 # it possible to build off hyak and run on hyak, with minimal scripting
 # done at runtime for things like mpi which requre same version inside and 
 # outside the container 
+
+Stage: devel
+# Primary reasons to do stages were size and control of MPI impl. The thought is to 
+# Avoid choosing an exact version of MPI at build time so long as a "close enough" version is in use
+# and then swap out the libraries at runtime. This has the advantage of not having to build 
+# the container on Hyak because automating a build process there is annoying due to auth-ing into
+# a compute node.
+# 
+# Size was not much benefit, currently keeping it to avoid build stage having to be on hyak
+
 
 
 %files
@@ -27,7 +36,8 @@ Stage: devel
         #           Do we need both at build time? 
         #           Is it linking against something that will let it use mpi?
 	# TODO: Do we want hdf5-openmpi-static or hdf5-openmpi-devel or both
-	yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5 hdf5-openmpi-devel hdf5-openmpi-static
+	yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5 hdf5-openmpi-devel
+
 	
 	
 	# TODO check version of mpi
@@ -50,11 +60,12 @@ Stage: devel
 	cd -
 
 	# Build and install ldasoft
-	# Tell ldadoft where mbh is
+	# Tell ldasoft where mbh is
 	export CMAKE_PREFIX_PATH="/src/mbh-install/:${CMAKE_PREFIX_PATH}"
 	cd /src/ldasoft
 		./install.sh /src/ldasoft-install
 	cd -
+
 
 Bootstrap: docker
 From: rockylinux:8.5.20220308
@@ -84,12 +95,26 @@ Stage: final
 	# TODO: Do we want to install mpitests-openmpi ?
 	# TODO Do we need: hdf5-openmpi ?
 
+	# For debugging ldasoft
+	yum -y install gdb
+	yum -y install 'dnf-command(debuginfo-install)'
+	yum -y debuginfo-install glibc-2.28-211.el8.x86_64 gsl-2.5-1.el8.x86_64 hdf5-openmpi-1.10.5-4.el8.x86_64 hwloc-libs-2.2.0-3.el8.x86_64 libaec-1.0.2-3.el8.x86_64 libevent-2.1.8-5.el8.x86_64 libgomp-8.5.0-16.el8_7.x86_64 openmpi-4.1.1-3.el8.x86_64 openmpi-devel-4.1.1-3.el8.x86_64 openssl-libs-1.1.1k-5.el8_5.x86_64 zlib-1.2.11-21.el8_7.x86_64
 
-# We assume $MPI_DIR is set on invocation and is bound to the version of MPI that the container was built with
-# There is currently no check of this assumption at runtime or at build time
+	# XCXC Current issue running ldasoft (specifically gb_mcmc) in this context. It cant write its output files. Need to somehow specify an overlay
+
 %environment
-	export MPI_DIR="/usr/lib64/openmpi"
+	# Note that under the hood this is a bash script and a critical one at that
+	#set -o pipefail
+	#set -o nounset
+	#set -o errexit
+
+	# If MPI_DIR is set by host invocation, we assume its bound and intend to run in bind mode, 
+	# otherwise we use the container-internal MPI and hope for the best.
+	MPI_DIR=${MPI_DIR:-'/usr/lib64/openmpi'}
+
 	export PATH="$MPI_DIR/bin:$PATH"
 	export LD_LIBRARY_PATH="$MPI_DIR/lib:$LD_LIBRARY_PATH"
+
+	
 
 
