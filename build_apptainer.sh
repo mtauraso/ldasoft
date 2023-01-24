@@ -18,7 +18,13 @@ BUILD_DIR=$BUILD_PREFIX/ldasoft_apptainer
 export SOURCE_DIR=$(pwd)
 
 mkdir -p $BUILD_DIR
-# TODO find and bind the directory we need for openmpi
+# TODO find and bind the directory we need for openmpi?
+
+
+if [ -f "$SOURCE_DIR/ldasoft_apptainer.sif" ]; then
+	rm $SOURCE_DIR/ldasoft_apptainer.sif
+fi
+
 apptainer build $BUILD_DIR/ldasoft_apptainer.sif $SOURCE_DIR/apptainer.def
 
 # For now copy back to source dir on success.

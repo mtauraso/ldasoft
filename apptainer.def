@@ -95,26 +95,25 @@ Stage: final
 	# TODO: Do we want to install mpitests-openmpi ?
 	# TODO Do we need: hdf5-openmpi ?
 
-	# For debugging ldasoft
-	yum -y install gdb
+	# For debugging ldasoft etc XCXC remove	
+	yum -y install gdb which
 	yum -y install 'dnf-command(debuginfo-install)'
-	yum -y debuginfo-install glibc-2.28-211.el8.x86_64 gsl-2.5-1.el8.x86_64 hdf5-openmpi-1.10.5-4.el8.x86_64 hwloc-libs-2.2.0-3.el8.x86_64 libaec-1.0.2-3.el8.x86_64 libevent-2.1.8-5.el8.x86_64 libgomp-8.5.0-16.el8_7.x86_64 openmpi-4.1.1-3.el8.x86_64 openmpi-devel-4.1.1-3.el8.x86_64 openssl-libs-1.1.1k-5.el8_5.x86_64 zlib-1.2.11-21.el8_7.x86_64
+	yum -y debuginfo-install glibc gsl hdf5-openmpi hwloc-libs libaec libevent libgomp openmpi openmpi-devel openssl-libs zlib
 
-	# XCXC Current issue running ldasoft (specifically gb_mcmc) in this context. It cant write its output files. Need to somehow specify an overlay
 
 %environment
-	# Note that under the hood this is a bash script and a critical one at that
-	#set -o pipefail
-	#set -o nounset
-	#set -o errexit
-
-	# If MPI_DIR is set by host invocation, we assume its bound and intend to run in bind mode, 
-	# otherwise we use the container-internal MPI and hope for the best.
-	MPI_DIR=${MPI_DIR:-'/usr/lib64/openmpi'}
+	# This is a bind mode container and we assume MPI_DIR is set to an install of MPI
+	# 
+	# Unfortunately this script runs too early to see if MPI_DIR is set
+	# The host has to tell us where MPI is, which means either environment/runscript will know
+	# The container cannot really function without MPI, but maybe we check this at app startup?
+	#
+	# For modifying path there are APPTAINERENV_PREPEND_PATH="<path>"
+	# For LD_LIBRARY_PATH it looks like you can do something hinky like APPTAINER_LD_LIBRARY_PATH="<path>:\$LD_LIBRARY_PATH"
+	# and we just trust the escaping to work properly. It might be worth trying APPTAINER_PREPEND_LD_LIBRARY_PATH just to
+	# see if that level of generality works.
+	# See here for the weird escaping: https://github.com/apptainer/singularity/issues/5781 
 
 	export PATH="$MPI_DIR/bin:$PATH"
 	export LD_LIBRARY_PATH="$MPI_DIR/lib:$LD_LIBRARY_PATH"
-
-	
-
 
