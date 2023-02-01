@@ -20,7 +20,15 @@ project(ldasoft VERSION 1.0.0 LANGUAGES C)
 # External packages
 find_package(GSL REQUIRED)
 find_package(OpenMP REQUIRED)
+
+set(HDF5_PREFER_PARALLEL true)
 find_package(HDF5 REQUIRED)
+if(HDF5_IS_PARALLEL)
+	message(STATUS "HDF5 parallel library found")
+else()
+	message(STATUS "HDF5 parallel library NOT found")
+endif()
+
 find_package(MPI REQUIRED)
 find_package(MBH)
 

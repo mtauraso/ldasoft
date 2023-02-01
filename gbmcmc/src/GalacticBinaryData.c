@@ -112,13 +112,16 @@ static void unpack_gsl_rft_output(double *x, double *x_gsl, int N)
 
 void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
 {
+   
+    printf("Got here!\n");
     /* LDASOFT-formatted structure for TDI data */
     struct TDI *tdi_td = malloc(sizeof(struct TDI));
         
     if(!strcmp(data->format,"frequency"))  LISA_Read_HDF5_LDC_RADLER_TDI(tdi_td, data->fileName);
     if(!strcmp(data->format,"sangria")) LISA_Read_HDF5_LDC_TDI(tdi_td, data->fileName, "/obs/tdi");
     
-    
+     
+    printf("Got past LISA functions\n");
     /* Select time segment of full data set */
     double start_time = data->t0[0];
     double stop_time = start_time + data->T;
@@ -134,15 +137,21 @@ void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
     double *E = malloc(N*sizeof(double));
     double *T = malloc(N*sizeof(double));
 
+    printf("Got past mallocs\n");
+
     /* Allocate data->tdi structure for Fourier transform output */
     alloc_tdi(tdi, N/2, N_TDI_CHANNELS);
     tdi->delta = 1./Tobs;
+
+    printf("Got past alloc_tdi\n");
 
     /* Select requested time segment */
     int n_start = (int)floor(start_time/dt); // first sample of time segment
     
     for(int n=0; n<N; n++)
     {
+	printf("Inside for loop n=%i N=%i n_start=%i \n", n, N, n_start);
+
         int m = n_start+n;
         X[n] = tdi_td->X[m];
         Y[n] = tdi_td->Y[m];
@@ -152,6 +161,8 @@ void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
         T[n] = tdi_td->T[m];
     }
     
+    printf("Got past for loop\n");
+
     /* lets get rid of those black holes
     struct TDI *tdi_td_mbhb = malloc(sizeof(struct TDI));
     LISA_Read_HDF5_LDC_TDI(tdi_td_mbhb, data->fileName, "/sky/mbhb/tdi");
@@ -213,7 +224,9 @@ void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
     
     /* Tukey window time-domain TDI channels tdi_td */
     double alpha = (2.0*FILTER_LENGTH/Tobs);
-    
+
+    printf("Right before tukey\n");
+
     tukey(X, alpha, N);
     tukey(Y, alpha, N);
     tukey(Z, alpha, N);
@@ -221,7 +234,8 @@ void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
     tukey(E, alpha, N);
     tukey(T, alpha, N);
     
-    
+    printf("Got past tukey\n");
+
     /* Fourier transform time-domain TDI channels */
     gsl_fft_real_wavetable * real = gsl_fft_real_wavetable_alloc (N);
     gsl_fft_real_workspace * work = gsl_fft_real_workspace_alloc (N);
@@ -232,6 +246,8 @@ void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
     gsl_fft_real_transform (A, 1, N, real, work);
     gsl_fft_real_transform (E, 1, N, real, work);
     gsl_fft_real_transform (T, 1, N, real, work);
+
+    printf("Got past gsl_fft_ stuff\n");
 
     /* Normalize FD data */
     double rft_norm = sqrt(Tobs)/(double)N;
@@ -259,6 +275,8 @@ void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
     unpack_gsl_rft_output(tdi->E, E, N);
     unpack_gsl_rft_output(tdi->T, T, N);
     
+    printf("Got past unpack_gsl_ stuff\n");
+	    
     /* Free memory */
     gsl_fft_real_wavetable_free (real);
     gsl_fft_real_workspace_free (work);
@@ -269,6 +287,8 @@ void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
     free(A);
     free(E);
     free(T);
+
+    printf("All done baby!\n");
     
 }
 

@@ -36,9 +36,13 @@ Stage: devel
         #           Do we need both at build time? 
         #           Is it linking against something that will let it use mpi?
 	# TODO: Do we want hdf5-openmpi-static or hdf5-openmpi-devel or both
-	yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5 hdf5-openmpi-devel
-
 	
+	yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5-openmpi hdf5-openmpi-devel
+	
+
+	# known working at least for build
+	#yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5 hdf5-openmpi-devel
+
 	
 	# TODO check version of mpi
 
@@ -75,6 +79,7 @@ Stage: final
 %setup
 # TODO create mountpoints for MPI binding
 
+
 %files from devel
 	/src/ldasoft-install /src/
 	/src/ldasoft /src/
@@ -90,30 +95,38 @@ Stage: final
 	#crb enable
 	
 	# Install our runtime deps
-	yum -y install gsl openmpi hdf5 
+	# which is required for startup scripts in this container
+	yum -y install gsl openmpi hdf5 hdf5-openmpi which
 	# yum -y install hdf5-openmpi 
 	# TODO: Do we want to install mpitests-openmpi ?
-	# TODO Do we need: hdf5-openmpi ?
+	# TODO Do we need: hdf5-openmpi and/or hdf5 only ?
 
 	# For debugging ldasoft etc XCXC remove	
-	yum -y install gdb which
+	yum -y install gdb
 	yum -y install 'dnf-command(debuginfo-install)'
-	yum -y debuginfo-install glibc gsl hdf5-openmpi hwloc-libs libaec libevent libgomp openmpi openmpi-devel openssl-libs zlib
+	yum -y debuginfo-install glibc gsl hdf5 hdf5-openmpi hwloc-libs libaec libevent libgomp openmpi openmpi-devel openssl-libs zlib ucx
+
+	BUILD_DATE=$(date)
+	echo "export BUILD_DATE=\"${BUILD_DATE}\"" >> $APPTAINER_ENVIRONMENT
+
+%runscript
+	echo "LDASoft container built: $BUILD_DATE"
+	mpirun -V
+	echo "MPI loaded from $(dirname $(which mpirun))"
+	# TODO: Can we improve this so the container reports whether it is in Bind/hybrid mode
+	#       Container would need to be aware if MPI location is in --bind list or internal
+
+	# Interepret the first argument as a command and the rest as arguments to that command
+	#$1 ${@:2}
+	$@
 
 
 %environment
-	# This is a bind mode container and we assume MPI_DIR is set to an install of MPI
-	# 
-	# Unfortunately this script runs too early to see if MPI_DIR is set
-	# The host has to tell us where MPI is, which means either environment/runscript will know
-	# The container cannot really function without MPI, but maybe we check this at app startup?
-	#
-	# For modifying path there are APPTAINERENV_PREPEND_PATH="<path>"
-	# For LD_LIBRARY_PATH it looks like you can do something hinky like APPTAINER_LD_LIBRARY_PATH="<path>:\$LD_LIBRARY_PATH"
-	# and we just trust the escaping to work properly. It might be worth trying APPTAINER_PREPEND_LD_LIBRARY_PATH just to
-	# see if that level of generality works.
-	# See here for the weird escaping: https://github.com/apptainer/singularity/issues/5781 
+	# Put the ldasoft and mbh tools on the path
+	export PATH=/src/ldasoft-install/bin:/src/mbh-install/bin:$PATH
 
-	export PATH="$MPI_DIR/bin:$PATH"
-	export LD_LIBRARY_PATH="$MPI_DIR/lib:$LD_LIBRARY_PATH"
+	# Put the openmpi versions of libraries on LD_LIBRARY_PATH and PATH
+	# When we bind the container these should get overwritten by any outside versions provided.
+	export LD_LIBRARY_PATH=/usr/lib64/openmpi/lib:$LD_LIBRARY_PATH
+	export PATH=/usr/lib64/openmpi/bin:$PATH
 
