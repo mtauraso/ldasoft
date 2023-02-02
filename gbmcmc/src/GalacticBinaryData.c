@@ -150,7 +150,10 @@ void GalacticBinaryReadHDF5(struct Data *data, struct TDI *tdi)
     
     for(int n=0; n<N; n++)
     {
-	printf("Inside for loop n=%i N=%i n_start=%i \n", n, N, n_start);
+	if ( n >= 6307326 ) {
+		printf("Inside for loop n=%i N=%i n_start=%i \n", n, N, n_start);
+		// This is just prior to the crash
+	}
 
         int m = n_start+n;
         X[n] = tdi_td->X[m];

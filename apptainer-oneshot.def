@@ -1,0 +1,84 @@
+Bootstrap: docker
+From: rockylinux:8.5.20220308
+# Note: We are using this because its the base OS used by Hyak compute nodes
+# The idea is that We have the best chances to find slurm modules of the 
+# exact right versions to integrate into the container, and this will make
+# it possible to build off hyak and run on hyak, with minimal scripting
+# done at runtime for things like mpi which requre same version inside and 
+# outside the container 
+
+
+
+%files
+	# Copy the ldasoft tree into the container
+	${SOURCE_DIR} /src/
+
+%setup
+
+	# Make the bind mount directory our post script will need
+	mkdir -p $APPTAINER_ROOTFS/sw/ompi/4.1.3/
+	mkdir -p $APPTAINER_ROOTFS/sw/ucx/1.12.1/
+
+%post
+	# Enable EPEL (Extra packages for enterprise linux)
+	# and the powertools/crb repositories
+	sed -i s/enabled=0$/enabled=1/g /etc/yum.repos.d/Rocky-PowerTools.repo
+	dnf -y install epel-release
+	#dnf -y install epel-release 'dnf-command(config-manager)'
+	#crb enable
+	
+
+	# Install our build deps
+	# TODO: Installing hdf5 and hdf5-devel fixes ldasoft build. 
+	# Open questions: 
+        #           Do we need both at build time? 
+        #           Is it linking against something that will let it use mpi?
+	# TODO: Do we want hdf5-openmpi-static or hdf5-openmpi-devel or both
+
+	# What I think we will need in one-shot world
+	yum -y install cmake git gsl gsl-devel hdf5-devel hdf5-openmpi hdf5-openmpi-devel which
+
+	# Builds something that crashes in the two-shot world	
+	# yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5-openmpi hdf5-openmpi-devel
+	
+	# known working at least for build
+	#yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5 hdf5-openmpi-devel
+
+
+	# Make sure MPI is sane
+	#
+	# Ensure $MPI_DIR is there and put it on LD_LIBRARY_PATH and PATH
+	export PATH="/sw/ompi/4.1.3/bin:/sw/ucx/1.12.1/bin${PATH}"
+	export LD_LIBRARY_PATH="/sw/ompi/4.1.3/lib:/sw/ucx/1.12.1/lib:${LD_LIBRARY_PATH}"
+
+	# Check version of mpi and location
+	ls -l /sw/ompi/4.1.3/
+	ls -l /sw/ucx/1.12.1/
+	which mpirun
+	
+	/sw/ompi/4.1.3/bin/mpirun -V
+	/sw/ucx/1.12.1/bin/ucx_info -v
+
+
+	# Build and install MBH from source
+	#
+	# TODO Ergonomics: What is the right place to get MBH from? is git okay, or 
+	# will this typically be a local checkout that we should build the ability 
+	# to specify
+	export MBH_GIT="https://github.com/mtauraso/LISA-Massive-Black-Hole.git"
+	export MBH_BRANCH="build-fixup" 
+	git clone --branch ${MBH_BRANCH} ${MBH_GIT} /src/mbh
+	cd /src/mbh
+		./install.sh /src/mbh-install
+	cd -
+
+	# Build and install ldasoft
+	#
+	# Tell ldasoft where mbh is
+	export CMAKE_PREFIX_PATH="/src/mbh-install/:${CMAKE_PREFIX_PATH}"
+	cd /src/ldasoft
+		./install.sh /src/ldasoft-install
+	cd -
+
+%environment
+	export PATH=/src/ldasoft-install/bin:/src/mbh-install/bin:$PATH

@@ -20,7 +20,7 @@ module load ompi
 
 # Second dirname call is to knock off /bin in mpirun's path
 MPI_DIR=$(dirname $(dirname $(which mpirun)))
-
+UCX_DIR="/sw/ucx/1.12.1"
 
 # XCXC: This maybe shouldn't be a bind at all. This might be something we pawn off on the user
 #       To make sure the directories on the host they want the containerized LDASOFT to interact
@@ -36,7 +36,7 @@ DATA_DIR="/gscratch/gwastro/mtauraso"
 # loaded in bind mode, but there may be a better way.
 export APPTAINERENV_MPI_DIR="$MPI_DIR"
 
-export APPTAINERENV_PREPEND_PATH="$MPI_DIR/bin"
+export APPTAINERENV_PREPEND_PATH="$MPI_DIR/bin:$UCX_DIR/bin"
 # This next line is some hackpants mchacker stuff, but essentially it is the same
 # as the prepend path statment above, but for LD_LIBRARY_PATH, and allows
 # executables starting on the container to find MPI shared libraries we are binding from
@@ -48,8 +48,8 @@ export APPTAINERENV_PREPEND_PATH="$MPI_DIR/bin"
 # IMHO there ought to be APPTAINERENV_PREPEND_LD_LIBRARY_PATH, but if you look at 
 # implementation of APPTAINERENV_PREPEND_PATH at time of writing the bypass on 
 # apptainer's end is specific only to PATH, and is somewhat awkward to generalize.
-export APPTAINERENV_LD_LIBRARY_PATH="$MPI_DIR/lib:\$LD_LIBRARY_PATH"
+export APPTAINERENV_LD_LIBRARY_PATH="$MPI_DIR/lib:$UCX_DIR/lib:\$LD_LIBRARY_PATH"
 
-apptainer run --bind "$MPI_DIR:$MPI_DIR:ro,$DATA_DIR:/data:rw" ldasoft_apptainer.sif $@
+apptainer run --bind "$MPI_DIR:$MPI_DIR:ro,$UCX_DIR:$UCX_DIR:ro,$DATA_DIR:/data:rw" ldasoft_apptainer.sif $@
 
 

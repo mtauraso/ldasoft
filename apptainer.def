@@ -36,7 +36,8 @@ Stage: devel
         #           Do we need both at build time? 
         #           Is it linking against something that will let it use mpi?
 	# TODO: Do we want hdf5-openmpi-static or hdf5-openmpi-devel or both
-	
+
+	# Vs below, this adds hdf5-openmpi in lieu of straight hdf5	
 	yum -y install cmake git gsl-devel openmpi-devel hdf5-devel hdf5-openmpi hdf5-openmpi-devel
 	
 
@@ -77,7 +78,7 @@ Stage: final
 # TODO figure out how MPI binding will really work
 
 %setup
-# TODO create mountpoints for MPI binding
+# TODO create mountpoints for MPI /UCX binding (if needed)
 
 
 %files from devel
@@ -97,7 +98,7 @@ Stage: final
 	# Install our runtime deps
 	# which is required for startup scripts in this container
 	yum -y install gsl openmpi hdf5 hdf5-openmpi which
-	# yum -y install hdf5-openmpi 
+
 	# TODO: Do we want to install mpitests-openmpi ?
 	# TODO Do we need: hdf5-openmpi and/or hdf5 only ?
 
@@ -115,6 +116,9 @@ Stage: final
 	echo "MPI loaded from $(dirname $(which mpirun))"
 	# TODO: Can we improve this so the container reports whether it is in Bind/hybrid mode
 	#       Container would need to be aware if MPI location is in --bind list or internal
+
+	ucx_info -v
+	echo "UCX loaded from $(dirname $(which ucx_info))"	
 
 	# Interepret the first argument as a command and the rest as arguments to that command
 	#$1 ${@:2}
