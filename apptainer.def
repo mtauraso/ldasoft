@@ -97,7 +97,7 @@ Stage: final
 	
 	# Install our runtime deps
 	# which is required for startup scripts in this container
-	yum -y install gsl openmpi hdf5 hdf5-openmpi which
+	yum -y install gsl openmpi hdf5 hdf5-openmpi which mpitests-openmpi
 
 	# TODO: Do we want to install mpitests-openmpi ?
 	# TODO Do we need: hdf5-openmpi and/or hdf5 only ?

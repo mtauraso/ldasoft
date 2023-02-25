@@ -88,3 +88,4 @@ CMakeScripts/
 CMakeTutorial.build/
 
 ldasoft_apptainer.sif
+**/slurm*.out
