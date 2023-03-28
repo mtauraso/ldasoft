@@ -653,8 +653,11 @@ int main(int argc, char *argv[])
     /* composite models are allocated to be the same size as tdi_full */
     setup_gf_data(global_fit);
 
+
     /* set up data for ucb model processes */
     setup_gbmcmc_data(gbmcmc_data, tdi_full);
+    //xcxc
+    MPI_Barrier(MPI_COMM_WORLD);
     
     /* set up data for verification binary model processes */
     if(vbmcmc_data->flags->NVB>0)setup_vbmcmc_data(vbmcmc_data, gbmcmc_data, tdi_full);
@@ -689,6 +692,8 @@ int main(int argc, char *argv[])
         copy_noise(model_psd,global_fit->psd);
 
     }
+    // xcxc
+    //MPI_Barrier(MPI_COMM_WORLD);
     MPI_Bcast(global_fit->psd->f, global_fit->psd->N, MPI_DOUBLE, root, MPI_COMM_WORLD);
     MPI_Bcast(global_fit->psd->SnX, global_fit->psd->N, MPI_DOUBLE, root, MPI_COMM_WORLD);
     MPI_Bcast(global_fit->psd->SnA, global_fit->psd->N, MPI_DOUBLE, root, MPI_COMM_WORLD);

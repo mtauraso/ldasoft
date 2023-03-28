@@ -18,7 +18,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks-per-node=5
-#SBATCH --mem-per-cpu=4G
+#SBATCH --mem-per-cpu=1G
 #
 #Kill us after 10h for now
 #SBATCH --time=10:00:00
