@@ -475,7 +475,12 @@ static void blocked_gibbs_load_balancing(struct GlobalFitData *global_fit, int r
     if(procID==root)
     {
         global_fit->max_block_time=0;
-        for(int n=0; n<Nproc; n++) if(block_time_vec[n]>global_fit->max_block_time) global_fit->max_block_time=block_time_vec[n];
+        for(int n=0; n<Nproc; n++) {
+            fprintf(stdout, "Thread %i took %i ticks of work", n, block_time_vec[n])
+            if(block_time_vec[n]>global_fit->max_block_time) {
+                global_fit->max_block_time=block_time_vec[n];
+            }
+        }
     }
     MPI_Bcast(&global_fit->max_block_time, 1, MPI_DOUBLE, root, MPI_COMM_WORLD);
     free(block_time_vec);
@@ -732,6 +737,7 @@ int main(int argc, char *argv[])
     do
     {
         cycle=1;
+        int start = clock();
         /* ============================= */
         /*     ULTRACOMPACT BINARIES     */
         /* ============================= */
@@ -848,6 +854,12 @@ int main(int argc, char *argv[])
 
         /* DEBUG */
         print_data_state(noise_data,gbmcmc_data,vbmcmc_data,mbh_data,GBMCMC_Flag,VBMCMC_Flag,Noise_Flag,MBH_Flag);
+
+        int stop = clock();
+
+        if(procID == root) {
+            fprintf(stdout, "Blocked gibbs cycle %i took %i ticks", cycle, stop-start);
+        }
 
         
     }while(gbmcmc_data->status!=0);
