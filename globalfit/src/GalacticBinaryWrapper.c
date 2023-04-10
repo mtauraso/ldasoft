@@ -115,10 +115,10 @@ void setup_frequency_segment(struct GBMCMCData *gbmcmc_data)
         // Warn the user if not all of the frequency bins defined will be explored
         if(procID == procID_min) {
             int N_node = procID_max - procID_min + 1;
-            if(procCount > fgridsize) {
+            if(N_node > fgridsize) {
                 fprintf(stdout, 
                     "Too many frequency bins defined in %s: frequency bins (%i) exceeds number of gbmcmc processes (%i). Only the first %i frequency bins will be explored.", 
-                    GRIDFILE, fgridsize, procCount, procCount);
+                    GRIDFILE, fgridsize, N_node, N_node);
             }
         }
         

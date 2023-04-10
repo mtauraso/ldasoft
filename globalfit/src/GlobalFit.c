@@ -43,6 +43,98 @@ struct GlobalFitData
     double max_block_time;
 };
 
+// should be N
+# define TIMING_MODE_COUNT 2
+// should be 0...(N-1)
+enum TimingMode {
+	Wait = 0, 
+	Work = 1
+};
+
+struct TimingData
+{
+    int elapsed_times[TIMING_MODE_COUNT];
+    
+    struct timespec start;
+
+    enum TimingMode current_mode;
+};
+
+// Puts us counting time in Setup mode
+void timing_reset(struct TimingData* td)
+{
+    memset(td, 0, sizeof(struct TimingData));
+    // Get the wall clock time and put it in start
+    clock_gettime(CLOCK_MONOTONIC, &td->start);
+    td->current_mode = Wait;
+}
+
+// If you pass an out of bounds mode, too bad
+// Use the enum in TimingData
+void timing_start(struct TimingData* td, enum TimingMode mode)
+{
+    // Save the prior start and collect current time
+    // This leaves the start of the next period in the structure
+    struct timespec old_start = td->start;
+    clock_gettime(CLOCK_MONOTONIC, &td->start);
+
+    // Calculate the period that just ended in milliseconds
+    time_t secs = td->start.tv_sec - old_start.tv_sec;
+    long nsec = td->start.tv_nsec - old_start.tv_nsec;
+
+    int msec = secs * 1000 ;
+    msec += (int) (nsec / 1000000 );
+
+    // Add to the running total for the prior phase
+    td->elapsed_times[td->current_mode] += msec;
+
+    // Set us to the new phase
+    td->current_mode = mode;
+}
+
+// Prints all time captured so far. The currently counting
+// time is exempted. ex: timing_print(&td->elapsed_times)
+void timing_print(int * elapsed_times, FILE * stream) 
+{
+    int total_time = 0;
+    for(int i = 0; i < TIMING_MODE_COUNT; i++) {
+        fprintf(stream, "Phase %i took %i ms\n", i, elapsed_times[i]);
+	total_time += elapsed_times[i];
+    }
+    fprintf(stream, "Total %i ms\n", total_time);
+}
+
+void timing_finalize(struct TimingData* td, int root, int procID, int Nproc) {
+
+    fprintf(stdout, "In Timing Finalize thread %i", procID);
+
+    // Make all threads end a timing period
+    timing_start(td, Wait);
+    
+    // Root process make a vector of all the TimingData's across every thread
+    int * timing_data_vec = calloc(sizeof(int), TIMING_MODE_COUNT * Nproc);
+    
+    // Make everyone MPI into the root threads timing vector
+    if(procID == root) {
+	MPI_Gather(td->elapsed_times, TIMING_MODE_COUNT, MPI_INT, timing_data_vec, TIMING_MODE_COUNT, MPI_INT, root, MPI_COMM_WORLD);
+    } else {
+	MPI_Gather(td->elapsed_times, TIMING_MODE_COUNT, MPI_INT, NULL, 0, MPI_INT, root, MPI_COMM_WORLD);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    timing_reset(td);
+    
+    // Print out stats
+    if(procID == root) {
+	for(int n=0; n<Nproc; n++) {
+	    fprintf(stdout, "Thread %i\n", n);
+            timing_print(&timing_data_vec[n*TIMING_MODE_COUNT], stdout);
+	}
+    }
+
+    free(timing_data_vec);
+}
+
 static void alloc_gf_data(struct GlobalFitData *global_fit)
 {
     global_fit->tdi_full = malloc(sizeof(struct TDI));
@@ -476,7 +568,6 @@ static void blocked_gibbs_load_balancing(struct GlobalFitData *global_fit, int r
     {
         global_fit->max_block_time=0;
         for(int n=0; n<Nproc; n++) {
-            fprintf(stdout, "Thread %i took %i ticks of work", n, block_time_vec[n])
             if(block_time_vec[n]>global_fit->max_block_time) {
                 global_fit->max_block_time=block_time_vec[n];
             }
@@ -730,6 +821,8 @@ int main(int argc, char *argv[])
     /* number of update steps for each module (scaled to MBH model update) */
     int cycle;
     global_fit->max_block_time=1;
+    struct TimingData td;
+    timing_reset(&td);
     /*
      * Master Blocked Gibbs sampler
      *
@@ -737,7 +830,6 @@ int main(int argc, char *argv[])
     do
     {
         cycle=1;
-        int start = clock();
         /* ============================= */
         /*     ULTRACOMPACT BINARIES     */
         /* ============================= */
@@ -745,6 +837,7 @@ int main(int argc, char *argv[])
         /* gbmcmc sampler gibbs update */
         if(GBMCMC_Flag)
         {
+	    timing_start(&td, Work);
             create_residual(global_fit, GBMCMC_Flag, VBMCMC_Flag, MBH_Flag);
             
             select_frequency_segment(gbmcmc_data->data, tdi_full);
@@ -778,6 +871,7 @@ int main(int argc, char *argv[])
         /* mbh model update */
         if(MBH_Flag)
         {
+	    timing_start(&td, Work);
             create_residual(global_fit, GBMCMC_Flag, VBMCMC_Flag, MBH_Flag);
             
             select_mbh_segment(mbh_data, tdi_full);
@@ -796,6 +890,7 @@ int main(int argc, char *argv[])
         /* MPI EXCHANGES OF UCB & MBH MODEL STATES */
         /* ========================================= */
 
+	timing_start(&td, Wait);
         if(global_fit->nUCB>0)share_gbmcmc_model(gbmcmc_data, vbmcmc_data, mbh_data, global_fit, root, procID);
         if(global_fit->nMBH>0)share_mbh_model   (gbmcmc_data, vbmcmc_data, mbh_data, global_fit, root, procID);
 
@@ -807,6 +902,7 @@ int main(int argc, char *argv[])
         /* vbmcmc sampler gibbs update */
         if(VBMCMC_Flag)
         {
+	    timing_start(&td, Work);
             create_residual(global_fit, GBMCMC_Flag, VBMCMC_Flag, MBH_Flag);
 
             select_vbmcmc_segments(vbmcmc_data, tdi_full);
@@ -828,6 +924,7 @@ int main(int argc, char *argv[])
         /* noise model update */
         if(Noise_Flag)
         {
+	    timing_start(&td, Work);
             create_residual(global_fit, GBMCMC_Flag, VBMCMC_Flag, MBH_Flag);
 
             select_frequency_segment(noise_data->data, tdi_full);
@@ -839,6 +936,7 @@ int main(int argc, char *argv[])
             global_fit->block_time = noise_data->cpu_time;
         }
 
+	timing_start(&td, Wait);
         /* get global status of gbmcmc samplers */
         gbmcmc_data->status = get_gbmcmc_status(gbmcmc_data,Nproc,root,procID);
 
@@ -855,12 +953,8 @@ int main(int argc, char *argv[])
         /* DEBUG */
         print_data_state(noise_data,gbmcmc_data,vbmcmc_data,mbh_data,GBMCMC_Flag,VBMCMC_Flag,Noise_Flag,MBH_Flag);
 
-        int stop = clock();
-
-        if(procID == root) {
-            fprintf(stdout, "Blocked gibbs cycle %i took %i ticks", cycle, stop-start);
-        }
-
+	/* Get timings and have root process print them */
+	timing_finalize(&td, root, procID, Nproc);
         
     }while(gbmcmc_data->status!=0);
     
