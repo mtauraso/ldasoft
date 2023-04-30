@@ -59,6 +59,7 @@ ldasoft.build
 
 #install directories
 build
+build_conda
 master
 fstat
 bayesline
@@ -86,4 +87,7 @@ Makefile
 CMakeCache.txt
 CMakeScripts/
 CMakeTutorial.build/
+
+#Slurm logs
+slurm-*.out
 
