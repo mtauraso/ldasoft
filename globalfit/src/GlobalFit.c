@@ -642,7 +642,7 @@ int main(int argc, char *argv[])
     alloc_data(data, flags);
             
     /* root process reads data */
-    if(procID==root) GalacticBinaryReadHDF5(data,global_fit->tdi_full);
+    if(procID==root) GalacticBinaryReadHDF5(data,global_fit->tdi_full, flags);
     MPI_Barrier(MPI_COMM_WORLD);
 
     /* alias of full TDI data */

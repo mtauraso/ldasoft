@@ -366,6 +366,10 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
     flags->updateCov   = 0;
     flags->match       = 0;
     flags->resume      = 0;
+    flags->removeDgb   = 0;
+    flags->removeIgb   = 0;
+    flags->removeMbhb  = 0;
+    flags->removeVgb   = 0;
     flags->DMAX        = DMAX_default;
     flags->NMCMC       = 100000;
     flags->NBURN       = 100000;
@@ -457,6 +461,10 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
         {"no-rj",       no_argument, 0, 0 },
         {"fit-gap",     no_argument, 0, 0 },
         {"calibration", no_argument, 0, 0 },
+        {"remove-dgb",  no_argument, 0, 0 },
+        {"remove-igb",  no_argument, 0, 0 },
+        {"remove-mbhb", no_argument, 0, 0 },
+        {"remove-vgb",  no_argument, 0, 0 },
         {0, 0, 0, 0}
     };
     
@@ -505,6 +513,10 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
                 if(strcmp("fit-gap",     long_options[long_index].name) == 0) flags->gap        = 1;
                 if(strcmp("calibration", long_options[long_index].name) == 0) flags->calibration= 1;
                 if(strcmp("resume",      long_options[long_index].name) == 0) flags->resume     = 1;
+                if(strcmp("remove-dgb",  long_options[long_index].name) == 0) flags->removeDgb  = 1;
+                if(strcmp("remove-igb",  long_options[long_index].name) == 0) flags->removeIgb  = 1;
+                if(strcmp("remove-mbhb", long_options[long_index].name) == 0) flags->removeMbhb = 1;
+                if(strcmp("remove-vgb",  long_options[long_index].name) == 0) flags->removeVgb  = 1;
                 if(strcmp("threads",     long_options[long_index].name) == 0) flags->threads    = atoi(optarg);
                 if(strcmp("rundir",      long_options[long_index].name) == 0) strcpy(flags->runDir,optarg);
                 if(strcmp("duration",    long_options[long_index].name) == 0)
@@ -690,8 +702,8 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
 //    print_version(runlog);
     
     //Report on set parameters
-//    if(!flags->quiet) print_run_settings(argc, argv, data, orbit, flags, stdout);
-//    print_run_settings(argc, argv, data, orbit, flags, runlog);
+    if(!flags->quiet) print_run_settings(argc, argv, data, orbit, flags, stdout);
+    //print_run_settings(argc, argv, data, orbit, flags, runlog);
     
 //    fclose(runlog);
 }
