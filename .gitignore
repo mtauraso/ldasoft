@@ -91,3 +91,8 @@ CMakeTutorial.build/
 #Slurm logs
 slurm-*.out
 
+# conda stuff
+conda-dev
+
+# local output directori
+rundir*

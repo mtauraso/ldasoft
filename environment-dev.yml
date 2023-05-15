@@ -1,0 +1,18 @@
+# mamba env create --file=environment-dev.yml --prefix=./conda-dev
+# mamba env update --file=environment-dev.yml --prefix=./conda-dev
+name: ldasoft-gbmcmc-plots
+# Goal of this is to provide a conda environment that works
+# with the python scripts used to analyize gbmcmc output
+#
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - seaborn
+  - numpy
+  - matplotlib
+  - pip
+  - ipykernel
+  - astropy
+  - pip:
+    - chainconsumer
