@@ -184,8 +184,9 @@ struct Flags
     int psd;        //!<`[--psd=FILENAME; default=FALSE]`: use PSD input as ASCII file from command line
     int removeDgb;  //!<`[--remove-dgb; default=FALSE]`: remove distinguishable galactic binary signal when reading in sangria hdf5 file. Only active with --sangria and --hdf5data provided
     int removeIgb;  //!<`[--remove-igb; default=FALSE]`: remove interference galactic binary signal when reading in sangria hdf5 file. Only active with --sangria and --hdf5data provided
-    int removeMbhb;  //!<`[--remove-mbhb; default=FALSE]`: remove mbhb signal when reading in sangria hdf5 file. Only active with --sangria and --hdf5data provided
+    int removeMbhb; //!<`[--remove-mbhb; default=FALSE]`: remove mbhb signal when reading in sangria hdf5 file. Only active with --sangria and --hdf5data provided
     int removeVgb;  //!<`[--remove-vgb; default=FALSE]`: remove verification galactic binary signal when reading in sangria hdf5 file. Only active with --sangria and --hdf5data provided
+    int noFitNoise; //!<`[--no-fit-noise; default=FALSE]`: Do not include parameterized noise model in the MCMC. Similar to --psd=FILE but the noise model used is generated internally.
 
     ///@}
 

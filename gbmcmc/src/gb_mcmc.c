@@ -241,7 +241,7 @@ int main(int argc, char *argv[])
                 //reverse jump birth/death move
                 if(flags->rj)galactic_binary_rjmcmc(orbit, data, model_ptr, trial_ptr, chain, flags, prior, proposal, ic);
                 
-                if( (flags->strainData || flags->simNoise) && !flags->psd)
+                if( (flags->strainData || flags->simNoise) && !(flags->psd || flags->noFitNoise))
                     noise_model_mcmc(orbit, data, model_ptr, trial_ptr, chain, flags, ic);
 
                 //update fisher matrix for each chain

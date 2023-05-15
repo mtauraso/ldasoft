@@ -290,6 +290,7 @@ void print_usage()
     fprintf(stdout,"       --no-rj       : used fixed dimension                \n");
     fprintf(stdout,"       --calibration : marginalize over calibration errors \n");
     fprintf(stdout,"       --fit-gap     : fit for time gaps between epochs    \n");
+    fprintf(stdout,"       --no-fit-noise: do not include noise in MCMC        \n");
     fprintf(stdout,"\n");
     
     //Priors & Proposals
@@ -370,6 +371,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
     flags->removeIgb   = 0;
     flags->removeMbhb  = 0;
     flags->removeVgb   = 0;
+    flags->noFitNoise  = 0;
     flags->DMAX        = DMAX_default;
     flags->NMCMC       = 100000;
     flags->NBURN       = 100000;
@@ -465,6 +467,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
         {"remove-igb",  no_argument, 0, 0 },
         {"remove-mbhb", no_argument, 0, 0 },
         {"remove-vgb",  no_argument, 0, 0 },
+        {"no-fit-noise",no_argument, 0, 0 },
         {0, 0, 0, 0}
     };
     
@@ -517,6 +520,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
                 if(strcmp("remove-igb",  long_options[long_index].name) == 0) flags->removeIgb  = 1;
                 if(strcmp("remove-mbhb", long_options[long_index].name) == 0) flags->removeMbhb = 1;
                 if(strcmp("remove-vgb",  long_options[long_index].name) == 0) flags->removeVgb  = 1;
+                if(strcmp("no-fit-noise",long_options[long_index].name) == 0) flags->noFitNoise = 1;
                 if(strcmp("threads",     long_options[long_index].name) == 0) flags->threads    = atoi(optarg);
                 if(strcmp("rundir",      long_options[long_index].name) == 0) strcpy(flags->runDir,optarg);
                 if(strcmp("duration",    long_options[long_index].name) == 0)
