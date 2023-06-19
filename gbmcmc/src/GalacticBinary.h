@@ -158,7 +158,8 @@ struct Flags
     int fixSky;     //!<`[--fix-sky; default=FALSE]`: hold sky location fixed to injection parameters.  Set to `TRUE` if Flags::knownSource=`TRUE`.
     int fixFdot;
     int fixFreq;    //!<`[--fix-freq; default=FALSE]`: hold GW frequency fixed to injection parameters
-    int galaxyPrior;//!<`[--galaxy-prior; default=FALSE]`: use model of galaxy for sky location prior
+    int galaxyPrior;//!<`[--galaxy-prior; default=FALSE]`: use model of galaxy for sky location prior. Incompatible with --volume-prior.
+    int volumePrior;//!<`[--volume-prior; default=FALSE]`: use 3d volumetric model of galaxy for sky location and distance prior. Incompatible with --galaxy-prior.
     int snrPrior;   //!<`[--snr-prior; default=FALSE]`: use SNR prior for amplitude
     int emPrior;    //!<`[--em-prior=FILENAME]`: use input data file with EM-derived parameters for priors.
     int knownSource;//!<`[--known-source; default=FALSE]`: injection is known binary, will need polarization and phase to be internally generated. Sets Flags::fixSky = `TRUE`.

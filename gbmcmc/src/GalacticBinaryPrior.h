@@ -35,6 +35,10 @@
 #define GALAXY_Rb 0.8  //!< bulge radius (kpc)
 #define GALAXY_Rd 2.5  //!< disk radius (kpc)
 #define GALAXY_Zd 0.4  //!< disk height (kpc)
+
+#define GALAXY_BB_X (40.0*GALAXY_Rd) //!< Dimension of galactic bounding box in galactocentric x (kpc) used in generating sky location and 3d galaxy prior.
+#define GALAXY_BB_Y (40.0*GALAXY_Rd) //!< Dimension of galactic bounding box in galactocentric y (kpc) used in generating sky location and 3d galaxy prior.
+#define GALAXY_BB_Z (80.0*GALAXY_Zd) //!< Dimension of galactic bounding box in galactocentric z (kpc) used in generating sky location and 3d galaxy prior.
 ///@}
 
 ///@name Calibration prior
@@ -59,7 +63,7 @@ struct Prior
     double logPriorVolume; //!<prior volume \f$ -\sum \log(\theta_{\rm max}-\theta_{\rm min})\f$
     ///@}
 
-    ///@name Uniform prior
+    ///@name Sky Location prior
     ///@{
     double *skyhist; //!<2D histogram of prior density on sky
     double dcostheta; //!<size of `skyhist` bins in \f$\cos\theta\f$ direction
@@ -67,6 +71,18 @@ struct Prior
     double skymaxp; //!<max prior density of `skyhist`
     int ncostheta; //!<number of `skyhist` bins in \f$\cos\theta\f$ direction
     int nphi; //!<number of `skyhist` bins in \f$\phi\f$ direction
+    ///@}
+
+    ///@name 3D galaxy prior
+    ///@{
+    double * volhist; //!< 3D histogram of prior density in galactocentric coordinates (x,y,z)
+    double volmaxp; //!< Max prior density of volhist
+    int nx; //!< number of bins in x
+    int ny; //!< number of bins in y
+    int nz; //!< number of bins in z
+    double dx; //!< size of a bin in kpc x direction
+    double dy; //!< size of a bin in kpc y direction
+    double dz; //!< size of a bin in kpc z direction
     ///@}
     
     ///@name workspace
@@ -106,6 +122,16 @@ void set_gmm_prior(struct Flags *flags, struct Data *data, struct Prior *prior);
  \brief Sets Uniform prior for source model
  */
 void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *data, int verbose);
+
+/**
+ \brief Allocates a prior structure that can be used with set_ functions
+*/
+struct Prior * alloc_prior();
+
+/**
+ \brief Frees any previously allocated prior structure
+*/
+void free_prior(struct Prior *prior);
 
 /**
  \brief Computes joint prior for input parameters `params`

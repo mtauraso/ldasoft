@@ -132,8 +132,8 @@ int main(int argc, char *argv[])
         initialize_chain(chain, flags, &data->cseed, "w");
     
     /* Initialize priors */
-    struct Prior *prior = malloc(sizeof(struct Prior));
-    if(flags->galaxyPrior) set_galaxy_prior(flags, prior);
+    struct Prior *prior = alloc_prior();
+    if(flags->galaxyPrior || flags->volumePrior) set_galaxy_prior(flags, prior);
     if(flags->update) set_gmm_prior(flags, data, prior);
     
     /* Initialize MCMC proposals */
@@ -350,6 +350,7 @@ int main(int argc, char *argv[])
     //free_noise(data->noise[FIXME]);
     //free_tdi(data->tdi[FIXME]);
     free_chain(chain,flags);
+    free_prior(prior);
     //free(model[FIXME][FIXME]);
     //free(trial[FIXME][FIXME]);
     //free(data);

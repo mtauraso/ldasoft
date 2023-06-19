@@ -197,6 +197,8 @@ void print_run_settings(int argc, char **argv, struct Data *data, struct Orbit *
     else                   fprintf(fptr,"  Calibration is....... DISABLED\n");
     if(flags->galaxyPrior) fprintf(fptr,"  Galaxy prior is ..... ENABLED\n");
     else                   fprintf(fptr,"  Galaxy prior is ..... DISABLED\n");
+    if(flags->volumePrior) fprintf(fptr,"  3d Galaxy prior is .. ENABLED\n");
+    else                   fprintf(fptr,"  3d Galaxy prior is .. DISABLED\n");
     if(flags->snrPrior)    fprintf(fptr,"  SNR prior is ........ ENABLED\n");
     else                   fprintf(fptr,"  SNR prior is ........ DISABLED\n");
     if(flags->simNoise)
@@ -347,6 +349,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
     flags->fixFreq     = 0;
     flags->fixFdot     = 0;
     flags->galaxyPrior = 0;
+    flags->volumePrior = 0;
     flags->snrPrior    = 1;
     flags->emPrior     = 0;
     flags->cheat       = 0;
@@ -451,6 +454,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
         {"fix-freq",    no_argument, 0, 0 },
         {"fix-fdot",    no_argument, 0, 0 },
         {"galaxy-prior",no_argument, 0, 0 },
+        {"volume-prior",no_argument, 0, 0 },
         {"snr-prior",   no_argument, 0, 0 },
         {"known-source",no_argument, 0, 0 },
         {"f-double-dot",no_argument, 0, 0 },
@@ -503,6 +507,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
                 if(strcmp("fix-freq",    long_options[long_index].name) == 0) flags->fixFreq    = 1;
                 if(strcmp("update",      long_options[long_index].name) == 0) flags->update     = 1;
                 if(strcmp("galaxy-prior",long_options[long_index].name) == 0) flags->galaxyPrior= 1;
+                if(strcmp("volume-prior",long_options[long_index].name) == 0) flags->volumePrior= 1;
                 if(strcmp("no-snr-prior",long_options[long_index].name) == 0) flags->snrPrior   = 0;
                 if(strcmp("prior",       long_options[long_index].name) == 0) flags->prior      = 1;
                 if(strcmp("f-double-dot",long_options[long_index].name) == 0) data->NP          = 9;
@@ -661,6 +666,12 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
     if(flags->verbose && flags->quiet)
     {
         fprintf(stderr,"--verbose and --quiet flags are in conflict\n");
+        exit(1);
+    }
+
+    if(flags->galaxyPrior && flags->volumePrior)
+    {
+        fprintf(stderr, "--volume-prior and --galaxy-prior are in conflict\n");
         exit(1);
     }
     

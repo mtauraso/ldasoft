@@ -42,7 +42,7 @@
 #include "GalacticBinaryPrior.h"
 #include "GalacticBinaryCatalog.h"
 
-static double loglike(double *x, int D)
+static inline double loglike(double *x, int D)
 {
     double u, rsq, z, s, ll;
     
@@ -60,8 +60,7 @@ static double loglike(double *x, int D)
     
 }
 
-
-static void rotate_galtoeclip(double *xg, double *xe)
+static inline void rotate_galtoeclip(double *xg, double *xe)
 {
     xe[0] = -0.05487556043*xg[0] + 0.4941094278*xg[1] - 0.8676661492*xg[2];
     
@@ -70,17 +69,261 @@ static void rotate_galtoeclip(double *xg, double *xe)
     xe[2] = -0.09647662818*xg[0] + 0.8622858751*xg[1] + 0.4971471918*xg[2];
 }
 
+// Called by galactic prior mcmc to generate a sample
+static inline void generate_galaxy_sample(double *current_sample /*in*/, double *proposed_sample /*out*/, gsl_rng *r) 
+{
+    double alpha, beta, xx;
+
+    alpha = gsl_rng_uniform(r);
+        
+    if(alpha > 0.7)  // uniform draw from a galactic bounding box
+    {
+        proposed_sample[0] = (GALAXY_BB_X*0.5)*(-1.0+2.0*gsl_rng_uniform(r));
+        proposed_sample[1] = (GALAXY_BB_Y*0.5)*(-1.0+2.0*gsl_rng_uniform(r));
+        proposed_sample[2] = (GALAXY_BB_Z*0.5)*(-1.0+2.0*gsl_rng_uniform(r));   
+    }
+    else  // Move the current sample a little bit, with a roughly exponential fall-off
+    {
+        beta = gsl_rng_uniform(r);
+        
+        if(beta > 0.8)
+        {
+            xx = 0.1;
+        }
+        else if (beta > 0.4)
+        {
+            xx = 0.01;
+        }
+        else
+        {
+            xx = 0.001;
+        }
+        proposed_sample[0] = current_sample[0] + gsl_ran_gaussian(r,xx);
+        proposed_sample[1] = current_sample[1] + gsl_ran_gaussian(r,xx);
+        proposed_sample[2] = current_sample[2] + 0.1*gsl_ran_gaussian(r,xx);
+    }
+}
+
+struct Prior * alloc_prior() {
+    return calloc(1, sizeof(struct Prior));
+}
+
+static inline void alloc_sky_prior(struct Prior * prior, int Nth, int Nph) {
+    int ith, iph;
+    
+    prior->skyhist = (double*)calloc((Nth*Nph),sizeof(double));
+    
+    prior->dcostheta = 2./(double)Nth;
+    prior->dphi      = 2.*M_PI/(double)Nph;
+    
+    prior->ncostheta = Nth;
+    prior->nphi      = Nph;
+    
+    prior->skymaxp = 0.0;
+
+    // TODO: using calloc above  these loops should be unnecessary
+    // IEEE-754 floating points have all zeros mapped to +0.0
+    for(ith=0; ith< Nth; ith++)
+    {
+        for(iph=0; iph< Nph; iph++)
+        {
+            prior->skyhist[ith*Nph+iph] = 0.0;
+        }
+    }
+}
+
+static inline void alloc_volume_prior(struct Prior * prior, int Nx, int Ny, int Nz){
+    prior->volhist = (double *)calloc((Nx*Ny*Nz), sizeof(double));
+
+    prior->nx = Nx;
+    prior->ny = Ny;
+    prior->nz = Nz;
+
+    prior->dx = GALAXY_BB_X/Nx;
+    prior->dy = GALAXY_BB_Y/Ny;
+    prior->dz = GALAXY_BB_Z/Nz;
+}
+
+// Called by galactic prior generator mcmc to sample the chain to generate the sky prior
+static inline void sample_sky_prior(struct Prior *prior, double *chain_sample)
+{
+    double xg[3], xe[3];
+    double *x = chain_sample;
+    double r_ec, theta, phi;
+    int ith, iph;
+    int Nth = prior->ncostheta;
+    int Nph = prior->nphi;
+
+    /* rotate from galactic to ecliptic coordinates */
+            
+    xg[0] = x[0] - GALAXY_RGC;   // solar barycenter is offset from galactic center along x-axis (by convention)
+    xg[1] = x[1];
+    xg[2] = x[2];
+    
+    rotate_galtoeclip(xg, xe);
+    
+    r_ec = sqrt(xe[0]*xe[0]+xe[1]*xe[1]+xe[2]*xe[2]);
+    
+    theta = M_PI/2.0-acos(xe[2]/r_ec);
+    
+    phi = atan2(xe[1],xe[0]);
+    
+    if(phi<0.0) phi += 2.0*M_PI;
+    
+    //      if(mc%1000 == 0 && flags->verbose) fprintf(chain,"%d %e %e %e %e %e %e %e\n", mc/1000, logLx, x[0], x[1], x[2], theta, phi, r_ec);
+    
+    ith = (int)(0.5*(1.0+sin(theta))*(double)(Nth));
+    //iph = (int)(phi/(2.0*M_PI)*(double)(Nph));
+    //ith = (int)(0.5*(1.0-sin(theta))*(double)(Nth));
+    iph = (int)((2*M_PI-phi)/(2.0*M_PI)*(double)(Nph));
+    
+    //ith = (int)floor(Nth*gsl_rng_uniform(r));
+    //iph = (int)floor(Nph*gsl_rng_uniform(r));
+    
+    // Error checking
+    if(ith < 0 || ith > Nth -1) printf("Out of bounds in Theta direction: %d %d\n", ith, iph);
+    if(iph < 0 || iph > Nph -1) printf("Out of bounds in Phi direction: %d %d\n", ith, iph);
+    
+    prior->skyhist[ith*Nph+iph] += 1.0;
+}
+
+
+// Called by the galactic prior generator to sample the chain and generate the 3d volumetric galaxy prior
+static inline void sample_volume_prior(struct Prior *prior, double *chain_sample) {
+    // Figure out what bucket this sample is in
+    int Bx = (int)((chain_sample[0] + GALAXY_BB_X*0.5) / (prior->dx));
+    int By = (int)((chain_sample[1] + GALAXY_BB_Y*0.5) / (prior->dy));
+    int Bz = (int)((chain_sample[2] + GALAXY_BB_Z*0.5) / (prior->dz));
+
+    int voxel_idx = Bx*prior->ny*prior->nz + By*prior->nz + Bz;
+
+    if(voxel_idx < 0 || voxel_idx > prior->nx*prior->ny*prior->nz) {
+        printf("Out of bounds access to volhist: %d %d %d\n", Bx, By, Bz);
+    }
+
+    // Index, add one to the count
+    prior->volhist[voxel_idx] += 1.0;
+
+    return;
+}
+
+// Called as the last step in generation of the sky prior.
+// Histogram values are converted from counts to log(probability / solid angle)
+// 10% of total probability is subtracted from counts and distributed evenly across all bins (set with uni)
+// Sets maximum histogram value for sky prior
+void convert_sky_prior(struct Prior *prior, int cnt) {
+    double dOmega, xx, yy, zz;
+    int iph, ith;
+    int Nth = prior->ncostheta;
+    int Nph = prior->nphi;
+
+    // Solid angle subtended by an angular bin
+    dOmega = 4.0*M_PI/(double)(Nth*Nph);
+    
+    double uni = 0.1;
+    //fprintf(stderr,"\n   HACK:  setup_galaxy_prior() uni=%g\n",uni);
+
+    yy = (1.0-uni)/(double)(cnt);
+    zz = uni/(double)(Nth*Nph);
+    
+    yy /= dOmega;
+    zz /= dOmega;
+    
+    for(ith=0; ith< Nth; ith++)
+    {
+        for(iph=0; iph< Nph; iph++)
+        {
+            xx = yy*prior->skyhist[ith*Nph+iph];
+            prior->skyhist[ith*Nph+iph] = log(xx + zz);
+            if(prior->skyhist[ith*Nph+iph]>prior->skymaxp) prior->skymaxp = prior->skyhist[ith*Nph+iph];
+        }
+    }
+}
+
+void convert_volume_prior(struct Prior *prior, int cnt) {
+    int num_buckets = prior->nx*prior->ny*prior->nz;
+
+    // volume of a bucket in kpc^3
+    double dVol = (GALAXY_BB_X*GALAXY_BB_Y*GALAXY_BB_Z)/(double)(num_buckets);
+
+    // Amount of total probabilty to redistribute uniformly across volume
+    double uni = 0.1;
+
+    // Normalizing factor for converting count-> probability but with unitary 
+    // contribution subtracted out.
+    double count_normalization = (1.0 - uni)/(double)(cnt);
+
+    // Amount of the total unitary contribution each bucket gets
+    double uniform_contribution = uni/(double)(num_buckets);
+
+    // Both of these converted to units of probability / kpc^3
+    count_normalization /= dVol;
+    uniform_contribution /= dVol;
+
+    for(int i = 0; i < num_buckets; i++) {
+        double mcmc_contribution = count_normalization*prior->volhist[i];
+        prior->volhist[i] = log(uniform_contribution + mcmc_contribution);
+        if(prior->volhist[i] > prior->volmaxp) prior->volmaxp = prior->volhist[i];
+    }
+}
+
+// Called in verbose mode to dump the sky prior to a file
+// Output sky prior in verbsoe mode
+void dump_sky_prior(struct Prior *prior)
+{
+    int ith, iph;
+    int Nth = prior->ncostheta;
+    int Nph = prior->nphi;
+    double xx, yy;
+    FILE *fptr = fopen("skyprior.dat", "w");
+    
+    for(ith=0; ith< Nth; ith++)
+    {
+        xx = -1.0+2.0*((double)(ith)+0.5)/(double)(Nth);
+        for(iph=0; iph< Nph; iph++)
+        {
+            yy = 2.0*M_PI*((double)(iph)+0.5)/(double)(Nph);
+            fprintf(fptr,"%e %e %e\n", yy, xx, prior->skyhist[ith*Nph+iph]);
+        }
+        fprintf(fptr,"\n");
+    }
+    fclose(fptr);
+}
+
+void dump_volume_prior(struct Prior * prior) 
+{
+    int i, j, k;
+    double xx, yy, zz;
+    int voxel_index = 0;
+    FILE *fptr = fopen("3dgalaxyprior.dat", "w");
+    for(i=0; i < prior->nx; i++) {
+        xx = i*prior->dx - GALAXY_BB_X*0.5 + prior->dx*0.5;
+        for(j=0; j < prior->ny; j++) {
+            yy = j*prior->dy - GALAXY_BB_Y*0.5 + prior->dy*0.5;
+            for(k=0; k < prior->nz; k++) {
+                zz = k*prior->dz - GALAXY_BB_Z*0.5 + prior->dz*0.5;
+                fprintf(fptr, "%e %e %e %e\n", xx, yy, zz, prior->volhist[voxel_index]);
+                voxel_index +=1;
+            }
+        }
+    }
+    fclose(fptr);
+}
+
 void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
 {
     if(!flags->quiet)
     {
-        fprintf(stdout,"\n============ Galaxy model sky prior ============\n");
+        if(flags->galaxyPrior) fprintf(stdout,"\n============ Galaxy model sky prior ============\n");
+        if(flags->volumePrior) fprintf(stdout,"\n========= Galaxy model volumetric prior ========\n");
+
         fprintf(stdout,"Monte carlo over galaxy model\n");
-        fprintf(stdout,"   Distance to GC = %g kpc\n",GALAXY_RGC);
-        fprintf(stdout,"   Disk Radius    = %g kpc\n",GALAXY_Rd);
-        fprintf(stdout,"   Disk Height    = %g kpc\n",GALAXY_Zd);
-        fprintf(stdout,"   Bulge Radius   = %g kpc\n",GALAXY_Rb);
-        fprintf(stdout,"   Bulge Fraction = %g\n",    GALAXY_A);
+        fprintf(stdout,"   Distance to GC  = %g kpc\n",GALAXY_RGC);
+        fprintf(stdout,"   Disk Radius     = %g kpc\n",GALAXY_Rd);
+        fprintf(stdout,"   Disk Height     = %g kpc\n",GALAXY_Zd);
+        fprintf(stdout,"   Bulge Radius    = %g kpc\n",GALAXY_Rb);
+        fprintf(stdout,"   Bulge Fraction  = %g\n",    GALAXY_A);
+        fprintf(stdout,"   Bounding Volume = %g x %g x %g kpc\n", GALAXY_BB_X, GALAXY_BB_Y, GALAXY_BB_Z);
     }
     double *x, *y;  // current and proposed parameters
     int D = 3;  // number of parameters
@@ -88,12 +331,10 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     int Nph = 200;  // bins in phi
     int MCMC=100000000;
     int j;
-    int ith, iph, cnt;
-    double H, dOmega;
+    int cnt;
+    double H;
     double logLx, logLy;
-    double alpha, beta, xx, yy, zz;
-    double *xe, *xg;
-    double r_ec, theta, phi;
+    double beta;
     int mc;
     //  FILE *chain = NULL;
     
@@ -112,25 +353,13 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     r = gsl_rng_alloc (T);
     
     x =  (double*)calloc(D,sizeof(double));
-    xe = (double*)calloc(D,sizeof(double));
-    xg = (double*)calloc(D,sizeof(double));
     y =  (double*)calloc(D,sizeof(double));
     
-    prior->skyhist = (double*)calloc((Nth*Nph),sizeof(double));
-    
-    prior->dcostheta = 2./(double)Nth;
-    prior->dphi      = 2.*M_PI/(double)Nph;
-    
-    prior->ncostheta = Nth;
-    prior->nphi      = Nph;
-    
-    prior->skymaxp = 0.0;
-    
-    for(ith=0; ith< Nth; ith++)
-    {
-        for(iph=0; iph< Nph; iph++)
-        {
-            prior->skyhist[ith*Nph+iph] = 0.0;
+    if(flags->galaxyPrior) alloc_sky_prior(prior, Nth, Nph);
+    if(flags->volumePrior) {
+        alloc_volume_prior(prior, 200, 200, 200);
+        if(!flags->quiet) {
+            fprintf(stdout,"   Voxel size      = %g x %g x %g kpc\n", prior->dx, prior->dy, prior->dz);
         }
     }
     
@@ -145,44 +374,14 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     
     for(mc=0; mc<MCMC; mc++)
     {
-        if(mc%(MCMC/100)==0)printProgress((double)mc/(double)MCMC);
-        
-        alpha = gsl_rng_uniform(r);
-        
-        if(alpha > 0.7)  // uniform draw from a big box
-        {
-            
-            y[0] = 20.0*GALAXY_Rd*(-1.0+2.0*gsl_rng_uniform(r));
-            y[1] = 20.0*GALAXY_Rd*(-1.0+2.0*gsl_rng_uniform(r));
-            y[2] = 40.0*GALAXY_Zd*(-1.0+2.0*gsl_rng_uniform(r));
-            
-        }
-        else
-        {
-            
-            beta = gsl_rng_uniform(r);
-            
-            if(beta > 0.8)
-            {
-                xx = 0.1;
-            }
-            else if (beta > 0.4)
-            {
-                xx = 0.01;
-            }
-            else
-            {
-                xx = 0.001;
-            }
-            for(j=0; j< 2; j++) y[j] = x[j] + gsl_ran_gaussian(r,xx);
-            y[2] = x[2] + 0.1*gsl_ran_gaussian(r,xx);
-            
-        }
-        
-        
+        if(mc%(MCMC/100)==0) printProgress((double)mc/(double)MCMC);
+
+        generate_galaxy_sample(x, y, r);
+
         logLy = loglike(y, D);
         
         H = logLy - logLx;
+
         beta = gsl_rng_uniform(r);
         beta = log(beta);
         
@@ -194,84 +393,25 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
         
         if(mc%100 == 0)
         {
-            
-            /* rotate from galactic to ecliptic coordinates */
-            
-            xg[0] = x[0] - GALAXY_RGC;   // solar barycenter is offset from galactic center along x-axis (by convention)
-            xg[1] = x[1];
-            xg[2] = x[2];
-            
-            rotate_galtoeclip(xg, xe);
-            
-            r_ec = sqrt(xe[0]*xe[0]+xe[1]*xe[1]+xe[2]*xe[2]);
-            
-            theta = M_PI/2.0-acos(xe[2]/r_ec);
-            
-            phi = atan2(xe[1],xe[0]);
-            
-            if(phi<0.0) phi += 2.0*M_PI;
-            
-            //      if(mc%1000 == 0 && flags->verbose) fprintf(chain,"%d %e %e %e %e %e %e %e\n", mc/1000, logLx, x[0], x[1], x[2], theta, phi, r_ec);
-            
-            ith = (int)(0.5*(1.0+sin(theta))*(double)(Nth));
-            //iph = (int)(phi/(2.0*M_PI)*(double)(Nph));
-            //ith = (int)(0.5*(1.0-sin(theta))*(double)(Nth));
-            iph = (int)((2*M_PI-phi)/(2.0*M_PI)*(double)(Nph));
-            
-            //ith = (int)floor(Nth*gsl_rng_uniform(r));
-            //iph = (int)floor(Nph*gsl_rng_uniform(r));
-            
+            // TODO flags -> --3d-galaxy-prior, only do one of these sampling processes.
+            if(flags->galaxyPrior) sample_sky_prior(prior, x);
+            if(flags->volumePrior) sample_volume_prior(prior, x);
             cnt++;
-            
-            if(ith < 0 || ith > Nth -1) printf("%d %d\n", ith, iph);
-            if(iph < 0 || iph > Nph -1) printf("%d %d\n", ith, iph);
-            
-            prior->skyhist[ith*Nph+iph] += 1.0;
-            
-        }
-        
-    }
-    
-    dOmega = 4.0*M_PI/(double)(Nth*Nph);
-    
-    double uni = 0.1;
-    //fprintf(stderr,"\n   HACK:  setup_galaxy_prior() uni=%g\n",uni);
-    yy = (1.0-uni)/(double)(cnt);
-    zz = uni/(double)(Nth*Nph);
-    
-    yy /= dOmega;
-    zz /= dOmega;
-    
-    for(ith=0; ith< Nth; ith++)
-    {
-        for(iph=0; iph< Nph; iph++)
-        {
-            xx = yy*prior->skyhist[ith*Nph+iph];
-            prior->skyhist[ith*Nph+iph] = log(xx + zz);
-            if(prior->skyhist[ith*Nph+iph]>prior->skymaxp) prior->skymaxp = prior->skyhist[ith*Nph+iph];
         }
     }
-    
+
+    if(flags->galaxyPrior) convert_sky_prior(prior, cnt);
+    if(flags->volumePrior) convert_volume_prior(prior, cnt);
+
+    // Output sky prior in verbsoe mode
     if(flags->verbose)
     {
-        FILE *fptr = fopen("skyprior.dat", "w");
-        for(ith=0; ith< Nth; ith++)
-        {
-            xx = -1.0+2.0*((double)(ith)+0.5)/(double)(Nth);
-            for(iph=0; iph< Nph; iph++)
-            {
-                yy = 2.0*M_PI*((double)(iph)+0.5)/(double)(Nph);
-                fprintf(fptr,"%e %e %e\n", yy, xx, prior->skyhist[ith*Nph+iph]);
-            }
-            fprintf(fptr,"\n");
-        }
-        fclose(fptr);
+        if(flags->galaxyPrior) dump_sky_prior(prior);
+        if(flags->volumePrior) dump_volume_prior(prior);
     }
     
     free(x);
     free(y);
-    free(xe);
-    free(xg);
     gsl_rng_free (r);
     if(!flags->quiet)fprintf(stdout,"\n================================================\n\n");
     fflush(stdout);
@@ -541,6 +681,17 @@ void set_gmm_prior(struct Flags *flags, struct Data *data, struct Prior *prior)
     }
     
     //prior->gmm = data->catalog->entry[0]->gmm;
+}
+
+void free_prior(struct Prior *prior) {
+    if(prior->skyhist) free(prior->skyhist);
+    if(prior->volhist) free(prior->volhist);
+    if(prior->gmm) {
+        for(size_t n=0; n<prior->gmm->NMODE; n++) free_MVG(prior->gmm->modes[n]);
+        free(prior->gmm->modes);
+        free(prior->gmm);
+    }
+    free(prior);
 }
 
 double evaluate_gmm_prior(struct Data *data, struct GMM *gmm, double *params)
