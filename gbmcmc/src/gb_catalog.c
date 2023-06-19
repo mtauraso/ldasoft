@@ -728,7 +728,7 @@ int main(int argc, char *argv[])
         //evidence for source related to number of visits in the chain
         entry->evidence = (double)(entry->I-1)/(double)(IMAX/downsample);
         
-        fprintf(catalogFile,"%s %lg %lg\n",entry->name, entry->SNR, entry->evidence);
+        fprintf(catalogFile,"%s %lg %lg %lg %s/\n",entry->name, f_med, entry->SNR, entry->evidence, outdir);
     }
     fflush(catalogFile);
     fprintf(stdout,"\n");
