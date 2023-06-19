@@ -214,7 +214,7 @@ for f in chain_files:
     c.add_chain(chain,parameters=parameters,name=name,plot_contour=True)
 
 c.configure(plot_hists=False,sigmas=[0,1,2])
-plot=c.plotter.plot(figsize=(10,5),filename='plots/pe_net_fA.png')
+plot=c.plotter.plot(figsize=(10,5),filename='plots/pe_net_fA.png', log_scales=[False, True])
 
 # Joint f-fdot Plane
 parameters=[r'$f_0$',r'$\dot f$']
