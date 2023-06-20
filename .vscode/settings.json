@@ -15,6 +15,20 @@
         "system_error": "c",
         "typeinfo": "c",
         "*.tcc": "c",
-        "cstdlib": "c"
+        "cstdlib": "c",
+        "complex": "c",
+        "exception": "c",
+        "functional": "c",
+        "algorithm": "c",
+        "random": "c",
+        "memory": "c",
+        "new": "c",
+        "sstream": "c",
+        "streambuf": "c",
+        "string_view": "c",
+        "cmath": "c",
+        "type_traits": "c",
+        "utility": "c",
+        "galacticbinaryio.h": "c"
     }
 }

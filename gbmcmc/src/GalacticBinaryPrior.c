@@ -60,15 +60,6 @@ static inline double loglike(double *x, int D)
     
 }
 
-static inline void rotate_galtoeclip(double *xg, double *xe)
-{
-    xe[0] = -0.05487556043*xg[0] + 0.4941094278*xg[1] - 0.8676661492*xg[2];
-    
-    xe[1] = -0.99382137890*xg[0] - 0.1109907351*xg[1] - 0.00035159077*xg[2];
-    
-    xe[2] = -0.09647662818*xg[0] + 0.8622858751*xg[1] + 0.4971471918*xg[2];
-}
-
 // Called by galactic prior mcmc to generate a sample
 static inline void generate_galaxy_sample(double *current_sample /*in*/, double *proposed_sample /*out*/, gsl_rng *r) 
 {
@@ -78,9 +69,7 @@ static inline void generate_galaxy_sample(double *current_sample /*in*/, double 
         
     if(alpha > 0.7)  // uniform draw from a galactic bounding box
     {
-        proposed_sample[0] = (GALAXY_BB_X*0.5)*(-1.0+2.0*gsl_rng_uniform(r));
-        proposed_sample[1] = (GALAXY_BB_Y*0.5)*(-1.0+2.0*gsl_rng_uniform(r));
-        proposed_sample[2] = (GALAXY_BB_Z*0.5)*(-1.0+2.0*gsl_rng_uniform(r));   
+        _generate_uniform_galaxy_sample(proposed_sample, r);
     }
     else  // Move the current sample a little bit, with a roughly exponential fall-off
     {
@@ -142,34 +131,25 @@ static inline void alloc_volume_prior(struct Prior * prior, int Nx, int Ny, int 
     prior->dx = GALAXY_BB_X/Nx;
     prior->dy = GALAXY_BB_Y/Ny;
     prior->dz = GALAXY_BB_Z/Nz;
+
+    // Our bundled prior on M_chirp
+    prior->Mcmin = 0.15;
+    prior->Mcmax = 10;
+    prior->McLogVolume = log(prior->Mcmax-prior->Mcmin);
 }
 
 // Called by galactic prior generator mcmc to sample the chain to generate the sky prior
 static inline void sample_sky_prior(struct Prior *prior, double *chain_sample)
 {
-    double xg[3], xe[3];
     double *x = chain_sample;
     double r_ec, theta, phi;
     int ith, iph;
     int Nth = prior->ncostheta;
     int Nph = prior->nphi;
 
-    /* rotate from galactic to ecliptic coordinates */
+    /* Translate and rotate from galactocentrix xyz to phi, theta, and r_ec sky position*/
+    galactocentric_to_sky_distance(x, &phi, &theta, &r_ec);
             
-    xg[0] = x[0] - GALAXY_RGC;   // solar barycenter is offset from galactic center along x-axis (by convention)
-    xg[1] = x[1];
-    xg[2] = x[2];
-    
-    rotate_galtoeclip(xg, xe);
-    
-    r_ec = sqrt(xe[0]*xe[0]+xe[1]*xe[1]+xe[2]*xe[2]);
-    
-    theta = M_PI/2.0-acos(xe[2]/r_ec);
-    
-    phi = atan2(xe[1],xe[0]);
-    
-    if(phi<0.0) phi += 2.0*M_PI;
-    
     //      if(mc%1000 == 0 && flags->verbose) fprintf(chain,"%d %e %e %e %e %e %e %e\n", mc/1000, logLx, x[0], x[1], x[2], theta, phi, r_ec);
     
     ith = (int)(0.5*(1.0+sin(theta))*(double)(Nth));
@@ -187,13 +167,11 @@ static inline void sample_sky_prior(struct Prior *prior, double *chain_sample)
     prior->skyhist[ith*Nph+iph] += 1.0;
 }
 
-
-// Called by the galactic prior generator to sample the chain and generate the 3d volumetric galaxy prior
-static inline void sample_volume_prior(struct Prior *prior, double *chain_sample) {
+static inline int lookup_volume_prior(struct Prior *prior, double* location) {
     // Figure out what bucket this sample is in
-    int Bx = (int)((chain_sample[0] + GALAXY_BB_X*0.5) / (prior->dx));
-    int By = (int)((chain_sample[1] + GALAXY_BB_Y*0.5) / (prior->dy));
-    int Bz = (int)((chain_sample[2] + GALAXY_BB_Z*0.5) / (prior->dz));
+    int Bx = (int)((location[0] + GALAXY_BB_X*0.5) / (prior->dx));
+    int By = (int)((location[1] + GALAXY_BB_Y*0.5) / (prior->dy));
+    int Bz = (int)((location[2] + GALAXY_BB_Z*0.5) / (prior->dz));
 
     int voxel_idx = Bx*prior->ny*prior->nz + By*prior->nz + Bz;
 
@@ -201,10 +179,13 @@ static inline void sample_volume_prior(struct Prior *prior, double *chain_sample
         printf("Out of bounds access to volhist: %d %d %d\n", Bx, By, Bz);
     }
 
-    // Index, add one to the count
-    prior->volhist[voxel_idx] += 1.0;
+    return voxel_idx;
+}
 
-    return;
+// Called by the galactic prior generator to sample the chain and generate the 3d volumetric galaxy prior
+static inline void sample_volume_prior(struct Prior *prior, double *chain_sample) {
+    // Index, add one to the count
+    prior->volhist[lookup_volume_prior(prior, chain_sample)] += 1.0;
 }
 
 // Called as the last step in generation of the sky prior.
@@ -608,6 +589,12 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     
 }
 
+enum SkyPriorMode get_sky_prior_mode(struct Flags *flags) {
+    if(flags->galaxyPrior)      return galaxyPrior;
+    else if(flags->volumePrior) return volumePrior;                
+    return uniformPrior;
+}
+
 int check_range(double *params, double **uniform_prior, int NP)
 {
     //nan check
@@ -754,32 +741,40 @@ double evaluate_gmm_prior(struct Data *data, struct GMM *gmm, double *params)
     return log(P) + logJ;
 }
 
-double evaluate_prior(struct Flags *flags, struct Data *data, struct Model *model, struct Prior *prior, double *params)
+double evaluate_prior(struct Flags *flags, struct Data *data, struct Model *model, struct Prior *prior, struct Source *source)
 {
     double logP=0.0;
+    double *params = source->params;
     double **uniform_prior = model->prior;
     
     //guard against nan's, but do so loudly
     if(check_range(params, uniform_prior, model->NP)) return -INFINITY;
 
     //update from existing runs prior
-    if(flags->update) logP = evaluate_gmm_prior(data, prior->gmm, params);
-    
+    if(flags->update)
+    {
+        logP = evaluate_gmm_prior(data, prior->gmm, params);
+    }
     //blind search prior
     else
     {
-        //sky location prior
-        logP += evalaute_sky_location_prior(params, uniform_prior, model->logPriorVolume, flags->galaxyPrior, prior->skyhist, prior->dcostheta, prior->dphi, prior->nphi);
-        
-        //amplitude prior
-        if(flags->snrPrior)
-        {
-            logP += evaluate_snr_prior(data, model, params);
-        }
-        else
-        {
-            if(params[3]<uniform_prior[3][0] || params[3]>uniform_prior[3][1]) return -INFINITY;
-            logP -= model->logPriorVolume[3];
+        if(flags->volumePrior) {
+            // Sky location and amplitude handled together
+            logP += evaluate_volume_prior(prior, source);
+        } else {
+            //sky location prior
+            logP += evaluate_sky_location_prior(params, uniform_prior, model->logPriorVolume, flags->galaxyPrior, prior->skyhist, prior->dcostheta, prior->dphi, prior->nphi);
+
+            //amplitude prior
+            if(flags->snrPrior)
+            {
+                logP += evaluate_snr_prior(data, model, params);
+            }
+            else
+            {
+                if(params[3]<uniform_prior[3][0] || params[3]>uniform_prior[3][1]) return -INFINITY;
+                if(!flags->volumePrior) logP -= model->logPriorVolume[3];
+            }
         }
         
         //everything else uses simple uniform priors
@@ -816,11 +811,29 @@ double evaluate_uniform_priors(double *params, double **uniform_prior, double *l
     return logP;
 }
 
-double evalaute_sky_location_prior(double *params, double **uniform_prior, double *logPriorVolume, int galaxyFlag, double *skyhist, double dcostheta, double dphi, int nphi)
+// Returns the log probability density at the location we drew
+double evaluate_volume_prior(struct Prior *prior, struct Source *source) {
+    double logP;
+    double location[3];
+
+    location[0] = source->X;
+    location[1] = source->Y;
+    location[2] = source->Z;
+
+    // get the density from the voxel in use
+    logP = prior->volhist[lookup_volume_prior(prior, location)];
+
+    // We also drew M_chirp from a uniform prior
+    logP -= prior->McLogVolume;
+
+    return logP;
+}
+
+double evaluate_sky_location_prior(double *params, double **uniform_prior, double *logPriorVolume, enum SkyPriorMode galaxyFlag, double *skyhist, double dcostheta, double dphi, int nphi)
 {
     
     double logP = 0.0;
-    if(galaxyFlag)
+    if(galaxyFlag==galaxyPrior)
     {
         if(params[1]<uniform_prior[1][0] || params[1]>uniform_prior[1][1]) return -INFINITY;
         
@@ -847,7 +860,7 @@ double evalaute_sky_location_prior(double *params, double **uniform_prior, doubl
         //    fprintf(fptr,"%i %i %i %g\n",i,j,k,prior->skyhist[k]);
         //    fclose(fptr);
     }
-    else
+    else if(galaxyFlag==uniformPrior)
     {
         //colatitude (reflective)
         if(params[1]<uniform_prior[1][0] || params[1]>uniform_prior[1][1]) return -INFINITY;

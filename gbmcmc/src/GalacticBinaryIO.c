@@ -674,6 +674,14 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
         fprintf(stderr, "--volume-prior and --galaxy-prior are in conflict\n");
         exit(1);
     }
+
+    if(!flags->snrPrior && flags->volumePrior)
+    {
+        fprintf(stderr, "--volume-prior and --no-snr-prior are in conflict.\n");
+        fprintf(stderr, "Volumetric prior works by drawing a voxel for 3d location and a value for M_chirp.\n");
+        fprintf(stderr, "Together these imply a gravitational wave amplitude, and therefore an SNR.\n");
+        exit(1);
+    }
     
     //Chains should be a multiple of threads for best usage of cores
     if(chain->NC % flags->threads !=0){

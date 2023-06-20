@@ -80,6 +80,12 @@ struct Proposal
     size_t Ngmm; //!< number of mixture models (1/source)
     struct GMM **gmm; //!<array of individual mixture models
     ///@}
+
+    /** @name For Prior proposal disambiguation in unorthodox use of utility arrays.
+     */
+    ///@{
+    bool is_prior;
+    ///@}
 };
 
 /**
@@ -100,14 +106,18 @@ void print_acceptance_rates(struct Proposal **proposal, int NP, int ic, FILE *fp
  */
 double t0_shift(UNUSED struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, UNUSED double *params, gsl_rng *seed);
 
+#if 0
 /**
 \brief Fair draw from prior for each parameter
+
+This function perfoms true rejection sampling on the priors for the various components.
  
  @param params (updates \f$\vec\theta\f$)
  @return logQ = \f$\ln p(\f$ \c params \f$)\f$
 
  */
 double draw_from_prior(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed);
+#endif
 
 /**
 \brief Fair draw from gaussian mixture model prior for each parameter
@@ -119,7 +129,14 @@ double draw_from_prior(struct Data *data, struct Model *model, struct Source *so
 double draw_from_gmm_prior(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed);
 
 /**
-\brief Fair draw from uniform ranges for each parameter
+\brief Fair draw from uniform ranges for each parameter (except Amplitude)
+
+This draws from a uniform prior for everything except amplitude.
+This function is used extensively, even in situations where there are non-uniform priors in use for various parameters
+If the calling component requires a non-unform density function, it must also call prior_density function and use the return value 
+for rejection sampling somewhere downstream.
+
+For the amplitude parameter this function performs true rejection sampling on a uniform SNR prior.
  
  @param params (updates \f$\vec\theta\f$)
  @return logQ = \f$\ln p(\f$ \c params \f$)\f$
@@ -211,6 +228,7 @@ double draw_from_fstatistic(struct Data *data, UNUSED struct Model *model, UNUSE
  */
 double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed);
 
+#if 0
 /**
  \brief Draw \f$f_0\f$ weighted by power spectrum of data
  
@@ -219,6 +237,7 @@ double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED stru
 
  */
 double draw_from_spectrum(struct Data *data, struct Model *model, struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed);
+#endif
 
 /**
  \brief Shift \f$f_0\f$ by orbital modulation frequency
@@ -258,6 +277,7 @@ double psi_phi_jump(UNUSED struct Data *data, UNUSED struct Model *model, struct
  */
 double jump_from_fstatistic(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed);
 
+#if 0
 /**
  \brief Draw sky location from galaxy prior defined in set_galaxy_prior()
  
@@ -268,7 +288,7 @@ double jump_from_fstatistic(struct Data *data, struct Model *model, struct Sourc
 
  */
 double draw_from_galaxy_prior(struct Model *model, struct Prior *prior, double *params, gsl_rng *seed);
-
+#endif
 
 /**
  \brief Fair draw on phase and amplitude calibration parameters
@@ -322,6 +342,18 @@ void setup_fstatistic_proposal(struct Orbit *orbit, struct Data *data, struct Fl
  are stored in an unintuitive way so take a good look at source code.
  */
 void setup_prior_proposal(struct Flags *flags, struct Prior *prior, struct Proposal *proposal);
+
+/**
+ \brief Unpack Proposal structures back into a prior
+ 
+ Reverse of setup_prior_proposal, takes the packed structures in a proposal
+ and updates pointers in a prior structure. This allows the proposal logic
+ and the prior logic to share code in a more ergonomic way.
+
+ When the galaxy prior is used for \f${\cos\theta,\phi}\f$ the data
+ are stored in an unintuitive way so take a good look at source code.
+ */
+enum SkyPriorMode unpack_prior_proposal(struct Proposal *proposal, struct Prior *prior);
 
 /**
  \brief Check that covariance matrix proposal is properly normalized

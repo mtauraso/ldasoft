@@ -20,6 +20,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <assert.h>
 
 #include <gsl/gsl_blas.h>
 
@@ -204,11 +205,13 @@ void print_acceptance_rates(struct Proposal **proposal, int NP, int ic, FILE *fp
     }
 }
 
+// xcxc Dead code
+# if 0
 double draw_from_spectrum(struct Data *data, struct Model *model, struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
 {
     //TODO: Work in amplitude
     
-    //rejections ample for f
+    //rejection sample for f
     double alpha;
     int q;
     do
@@ -219,15 +222,12 @@ double draw_from_spectrum(struct Data *data, struct Model *model, struct Source 
     }while(data->p[q]<alpha);
 
     //random draws for other parameters
-    for(int n=1; n<source->NP; n++) params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
+    for(int n=1; n<source->NP; n++) draw_uniform_parameter(n,model->prior[n][0], model->prior[n][1], NULL, params, seed);
     
     return 0;
 }
+#endif
 
-double draw_from_prior(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed)
-{
-    return draw_from_uniform_prior(data,model,source,proposal,params,seed);
-}
 
 double draw_from_gmm_prior(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed)
 {
@@ -302,83 +302,137 @@ double gmm_prior_density(struct Data *data, struct Model *model, struct Source *
     return log(p/(double)proposal->Ngmm);
 }
 
-double draw_from_uniform_prior(UNUSED struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
+// Dead code
+#if 0
+double draw_from_prior(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed) 
 {
-    
     double logQ = 0.0;
-    int n;
-    
-    //frequency
-    n = 0;
-    params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-    logQ -= model->logPriorVolume[n];
-    
-    //sky location
-    n = 1;
-    params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-    logQ -= model->logPriorVolume[n];
-    
-    n = 2;
-    params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-    logQ -= model->logPriorVolume[n];
-    
-    //amplitude
-    //n = 3;
+
+    // Unpack proposal -> prior structure for galaxy code if needed
+    struct Prior prior;
+    int galaxyPriorMode = unpack_prior_proposal(proposal, &prior);
+    int galaxyPrior = galaxyPriorMode & 0x1;
+    int volumePrior = galaxyPriorMode & 0x2;
+
+    for(int n=0; n < source->NP; n++) {
+
+        // galaxy and volume priors both draw a sky location
+        if(n=1 && (galaxyPrior || volumePrior)) continue;
+        if(n=2 && (galaxyPrior || volumePrior)) continue;
+
+        // volume prior additionally draws fdot
+        if(n=7 && volumePrior) continue;
+
+        // Amplitude is drawn differently
+        if(n=3) continue;
+
+        logQ += draw_uniform_parameter(n, model->prior[n][0], model->prior[n][1], model->logPriorVolume, params, seed);
+    }
+
+    // Draw amplitude (n=3)
     logQ += draw_signal_amplitude(data, model, source, proposal, params, seed);
-    
-    //inclination
-    n = 4;
-    params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-    logQ -= model->logPriorVolume[n];
-    
-    //polarization
-    n = 5;
-    params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-    logQ -= model->logPriorVolume[n];
-    
-    //phase
-    n = 6;
-    params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-    logQ -= model->logPriorVolume[n];
-    
-    //fdot
-    if(source->NP>7)
-    {
-        n = 7;
-        params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-        logQ -= model->logPriorVolume[n];
+
+    // Draw sky location if needed
+    if(galaxyPrior) logQ += draw_from_galaxy_prior(model, &prior, params, seed);
+
+    // xcxc draw_from_volume_prior needs to be rethought from Tyson emails
+    //if(volumePrior) logQ += draw_from_volume_prior(model, &prior, params, seed);
+
+    return logQ;
+}
+#endif
+
+
+static inline double draw_mchirp_uniform(/*in*/ struct Prior *prior, /*out*/ double *Mc, gsl_rng *seed) {
+    *Mc = prior->Mcmin + gsl_rng_uniform(seed) * (prior->Mcmax - prior->Mcmin);
+    return prior->McLogVolume;
+}
+
+// Does the draw from the volume prior and returns the probability associated with that draw.
+// Rejection sampling must happen later, because it isn't happening here.
+// This also handles the M_chirp prior and amplitude.
+double draw_from_volume_prior_uniform(struct Data *data, struct Source *source, struct Prior *prior, double *params, gsl_rng *seed)
+{
+    double x[3];
+    double r_ec, theta, phi;
+    double Mc;
+    double logP = 0.0;
+
+    // Draw uniformly from galactic bounding box.
+    logP += generate_uniform_galaxy_sample(x, seed);
+    galactocentric_to_sky_distance(x, &phi, &theta, &r_ec);
+
+    // Draw uniformly for M_chirp
+    logP += draw_mchirp_uniform(prior, &Mc, seed);
+
+    // Pack the standard representational params
+    params[1] = theta;
+    params[2] = phi;
+
+    // This is a kludge. The convention replicated here is in map_array_to_params()
+    params[3] = log(galactic_binary_Amp(Mc, params[0]/data->T, r_ec));
+
+    // Pack params we may need later in prior_density and evaluate_prior logic
+    // xcxc Do we really need all these? Can we cut the fat here?
+    source->Mc = Mc;
+    source->D = r_ec;
+    source->X = x[0];
+    source->Y = x[1];
+    source->Z = x[2];
+
+    return logP;
+}
+
+static inline double draw_uniform_parameter(int index, double min, double max, double logPriorVolume, double *params, gsl_rng *seed)
+{
+    params[index] = min + gsl_rng_uniform(seed) * (max - min);
+    return logPriorVolume;
+}
+
+double draw_from_uniform_prior(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed)
+{
+    double logQ = 0.0;
+
+    // If we are drawing from a 3d galaxy prior we need to unpack and do different things below.
+    struct Prior prior;
+    enum SkyPriorMode skyPriorMode= unpack_prior_proposal(proposal, &prior);
+
+    //frequency, sky location, amplitude(skipped), inclination, polarization, phase, fdot (and fdouble-dot)
+    for(int n=0; n < source->NP; n++) {
+        // For volume prior sky location and amplitude are drawn different.
+        if(volumePrior && ((n==1) || (n==2) || (n==3))) continue;
+        // Amplitude is always drawn based on SNR prior
+        if(n == 3) continue; 
+        logQ -= draw_uniform_parameter(n, model->prior[n][0], model->prior[n][1], model->logPriorVolume[n], params, seed);
     }
-    
-    //f-double-dot
-    if(source->NP>8)
-    {
-        n = 8;
-        params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-        logQ -= model->logPriorVolume[n];
+
+    if(skyPriorMode == volumePrior) {
+        logQ -= draw_from_volume_prior_uniform(data, source, &prior, params, seed);
+    } else {
+        //amplitude
+        //n = 3;
+        logQ += draw_signal_amplitude(data, model, source, proposal, params, seed);
     }
-    
-    
+
     return logQ;
 }
 
 double draw_from_extrinsic_prior(UNUSED struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
 {
     double logP = 0.0;
-    
-    for(int n=1; n<3; n++)
-    {
-        params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-        logP -= model->logPriorVolume[n];
+
+    for(int n=0; n < source->NP; n++) {
+        if(n == 0) continue; // skip frequency
+        if(n == 3) continue; // skip amplitude
+        if(n >= 7) continue; // skip f-dot and f-double-dot
+
+        logP -= draw_uniform_parameter(n, model->prior[n][0], model->prior[n][1], model->logPriorVolume[n], params, seed);
     }
-    for(int n=4; n<7; n++)
-    {
-        params[n] = model->prior[n][0] + gsl_rng_uniform(seed)*(model->prior[n][1]-model->prior[n][0]);
-        logP -= model->logPriorVolume[n];
-    }
-    
+
     return logP;
 }
 
+#if 0
 double draw_from_galaxy_prior(struct Model *model, struct Prior *prior, double *params, gsl_rng *seed)
 {
     double **uniform_prior = model->prior;
@@ -402,6 +456,7 @@ double draw_from_galaxy_prior(struct Model *model, struct Prior *prior, double *
     }while(alpha>logP);
     return logP;
 }
+#endif
 
 double draw_calibration_parameters(struct Data *data, struct Model *model, gsl_rng *seed)
 {
@@ -800,7 +855,7 @@ void initialize_proposal(struct Orbit *orbit, struct Data *data, struct Prior *p
     
     for(int i=0; i<chain->NP; i++)
     {
-        proposal[i] = malloc(sizeof(struct Proposal));
+        proposal[i] = calloc(1, sizeof(struct Proposal));
 
         proposal[i]->trial  = malloc(NC*sizeof(int));
         proposal[i]->accept = malloc(NC*sizeof(int));
@@ -960,7 +1015,7 @@ void initialize_vb_proposal(struct Orbit *orbit, struct Data *data, struct Prior
     
     for(int i=0; i<chain->NP; i++)
     {
-        proposal[i] = malloc(sizeof(struct Proposal));
+        proposal[i] = calloc(1,sizeof(struct Proposal));
 
         proposal[i]->trial  = malloc(NC*sizeof(int));
         proposal[i]->accept = malloc(NC*sizeof(int));
@@ -1335,6 +1390,11 @@ void setup_gmm_proposal(struct Data *data, struct Proposal *proposal)
     for(int n=0; n<proposal->Ngmm; n++) proposal->gmm[n] = data->catalog->entry[n]->gmm;
 }
 
+/*
+ * Packs the galaxy prior into the utility structures of the proposal
+ * Includes the flag indicating whether galaxy prior is enabled in the 
+ * proposal->size field
+ */
 void setup_prior_proposal(struct Flags *flags, struct Prior *prior, struct Proposal *proposal)
 {
     /*
@@ -1342,13 +1402,99 @@ void setup_prior_proposal(struct Flags *flags, struct Prior *prior, struct Propo
      into proposal for intput into standardized
      proposal density protocol
      */
-    proposal->size         = flags->galaxyPrior;
-    proposal->matrix       = malloc(2*sizeof(double *));
-    proposal->matrix[0]    = calloc(3,sizeof(double));
-    proposal->matrix[0][0] = prior->dcostheta;
-    proposal->matrix[0][1] = prior->dphi;
-    proposal->matrix[0][2] = (double)prior->nphi;
-    proposal->matrix[1]    = prior->skyhist;
+
+    enum SkyPriorMode priorMode = get_sky_prior_mode(flags);
+
+    proposal->size = (int) priorMode;
+    proposal->is_prior = true;
+
+    if (priorMode == galaxyPrior) {
+        proposal->matrix       = malloc(2*sizeof(double *));
+        proposal->matrix[0]    = calloc(3,sizeof(double));
+        proposal->matrix[0][0] = prior->dcostheta;
+        proposal->matrix[0][1] = prior->dphi;
+        proposal->matrix[0][2] = (double)prior->nphi;
+        proposal->matrix[1]    = prior->skyhist;
+    }
+
+    if (priorMode == volumePrior) {
+        proposal->matrix       = malloc(4*sizeof(double*));
+
+        proposal->matrix[0]    = calloc(3,sizeof(double));
+        proposal->matrix[0][0] = prior->dx;
+        proposal->matrix[0][1] = prior->dy;
+        proposal->matrix[0][2] = prior->dz;
+
+        // Needed for addressing volhist and bounds checking
+        proposal->matrix[1]    = calloc(3,sizeof(double));
+        proposal->matrix[1][0] = prior->nx;
+        proposal->matrix[1][1] = prior->ny;
+        proposal->matrix[1][2] = prior->nz;
+
+        proposal->matrix[2]    = prior->volhist;
+
+        // Needed for Mchirp prior
+        proposal->matrix[3]    = calloc(3, sizeof(double));
+        proposal->matrix[3][0] = prior->Mcmax;
+        proposal->matrix[3][1] = prior->Mcmin;
+        proposal->matrix[3][2] = prior->McLogVolume;
+
+    }
+}
+
+static inline enum SkyPriorMode sky_prior_mode_from_proposal(struct Proposal * proposal){
+    // Early return and report a uniform prior if we are somehow called on a proposal that
+    // was not packed with a prior. paranoid, but preserves behavior of caller when called 
+    // with a novel proposal.
+    //
+    // proposal-> size is used for different purposes. 
+    // This guards against unpacking a proposal that was not packed with a prior.
+    if(!proposal->is_prior) return uniformPrior;
+    return (enum SkyPriorMode) proposal->size;
+}
+
+/*
+ *   Unpack the galaxy prior pointers from a proposal structure to a prior structure
+ *   The resulting prior structure must be provided by the caller
+ *
+ *   Warning: only the fields relevant to the galaxy prior are copied. Other fields
+ *   are responsibility of the caller.
+ *
+ *   This is a shallow pointer copy and the underlying data structures are not owned 
+ *   by this code or caller.
+ * 
+ *   The galaxyPrior flag is returned.
+ */
+enum SkyPriorMode unpack_prior_proposal(struct Proposal *proposal, struct Prior * prior) {
+
+    enum SkyPriorMode priorMode = sky_prior_mode_from_proposal(proposal);
+
+    if(priorMode == galaxyPrior)
+    {
+        prior->dcostheta = proposal->matrix[0][0];
+        prior->dphi      = proposal->matrix[0][1];
+        prior->nphi      = (int) proposal->matrix[0][2];
+        prior->skyhist   = proposal->matrix[1];
+    }
+
+    if(priorMode == volumePrior)
+    {
+        prior->dx = proposal->matrix[0][0];
+        prior->dy = proposal->matrix[0][1];
+        prior->dz = proposal->matrix[0][2];
+
+        prior->nx = (int) proposal->matrix[1][0];
+        prior->ny = (int) proposal->matrix[1][1];
+        prior->nz = (int) proposal->matrix[1][2];
+
+        prior->volhist = proposal->matrix[2];
+
+        prior->Mcmax = proposal->matrix[3][0];
+        prior->Mcmin = proposal->matrix[3][1];
+        prior->McLogVolume = proposal->matrix[3][2];
+    }
+
+    return priorMode;
 }
 
 
@@ -1476,7 +1622,7 @@ void test_covariance_proposal(struct Data *data, struct Flags *flags, struct Mod
                 }
                 
                 
-                logP = evaluate_prior(flags, data, model, prior, model->source[0]->params);
+                logP = evaluate_prior(flags, data, model, prior, model->source[0]);
                 if(logP>-INFINITY) gamma+=1.;
             }
             
@@ -1740,7 +1886,7 @@ double evaluate_fstatistic_proposal(struct Data *data, UNUSED struct Model *mode
     double *skyhist = NULL; //dummy pointer for sky location prior
     
     //sky location prior
-    logP += evalaute_sky_location_prior(params, model->prior, model->logPriorVolume, 0, skyhist, 1, 1, 1);
+    logP += evaluate_sky_location_prior(params, model->prior, model->logPriorVolume, uniformPrior, skyhist, 1, 1, 1);
     
     //amplitude prior
     logP += evaluate_snr_prior(data, model, params);
@@ -1768,7 +1914,7 @@ double evaluate_fstatistic_proposal(struct Data *data, UNUSED struct Model *mode
     return logP;
 }
 
-double prior_density(struct Data *data, struct Model *model, UNUSED struct Source *source, struct Proposal *proposal, double *params)
+double prior_density(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params)
 {
     double logP = 0.0;
     double **uniform_prior = model->prior;
@@ -1784,21 +1930,22 @@ double prior_density(struct Data *data, struct Model *model, UNUSED struct Sourc
     }
     
     //unpack (obtuse) proposal structure
-    int galaxyPriorFlag =      proposal->size;
-    double dcostheta    =      proposal->matrix[0][0];
-    double dphi         =      proposal->matrix[0][1];
-    int nphi            = (int)proposal->matrix[0][2];
-    double *skyhist     =      proposal->matrix[1];
-    
-    //sky location prior
-    logP += evalaute_sky_location_prior(params, uniform_prior, model->logPriorVolume, galaxyPriorFlag , skyhist, dcostheta, dphi, nphi);
-    
-    //amplitude prior
-    logP += evaluate_snr_prior(data, model, params);
-    
+    struct Prior prior;
+    enum SkyPriorMode galaxyPriorMode = unpack_prior_proposal(proposal, &prior);
+
+    if (galaxyPriorMode==volumePrior) {
+        // Branch here because volume prior alters our amplitude calculation
+        // Amplitude was actually calculated from a draw of M_chirp and XYZ, not in the normal fashion.
+        logP += evaluate_volume_prior(&prior, source);
+    } else {
+        //sky location prior
+        logP += evaluate_sky_location_prior(params, uniform_prior, model->logPriorVolume, galaxyPriorMode , prior.skyhist, prior.dcostheta, prior.dphi, prior.nphi);
+
+        //amplitude prior
+        logP += evaluate_snr_prior(data, model, params);
+    }
     //everything else uses simple uniform priors
     logP += evaluate_uniform_priors(params, uniform_prior, model->logPriorVolume, model->NP);
-    
     
     return logP;
     

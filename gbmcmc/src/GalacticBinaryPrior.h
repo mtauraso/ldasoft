@@ -23,7 +23,7 @@
  
  Includes functions for createing and evaluating model priors.
  */
-
+#include <math.h>
 
 #ifndef GalacticBinaryPrior_h
 #define GalacticBinaryPrior_h
@@ -57,6 +57,14 @@
 */
 struct Prior
 {    
+    //xcxc todo:
+    // Prior ought contain more (not sure how much more) flag config information because it is passed about 
+    // and packed/unpacked when creating the prior proposal.
+    // It ought be that utility functions recieving a prior should not need to know --galaxy-flag or --volume-prior
+    // from some other source. Information about prior configuration in general ought walk with the prior
+    // Immediately this means --galaxy-prior/--volume-prior/neither state needs to be here as part of --volume-prior
+    // implementation
+
     ///@name Uniform prior
     ///@{
     double **prior; //!<upper and lower bounds for uniform priors \f$ [\theta_{\rm min},\theta_{\rm max}]\f$
@@ -83,6 +91,9 @@ struct Prior
     double dx; //!< size of a bin in kpc x direction
     double dy; //!< size of a bin in kpc y direction
     double dz; //!< size of a bin in kpc z direction
+    double Mcmax; // Max for prior on M_chirp
+    double Mcmin; // Min for prior on M_chrip
+    double McLogVolume; // log prior volume for M_chirp
     ///@}
     
     ///@name workspace
@@ -95,6 +106,20 @@ struct Prior
     /// Gaussian Mixture Model prior
     struct GMM *gmm;
 };
+
+/**
+ \brief Enumeration used for packing/unpacking of the prior into the proposal struct
+
+ See setup_prior_proposal and unpack_prior_proposal for pack/unpack logic.
+ This encodes the settings of flags->galaxyPrior and flags->volumePrior.
+*/
+enum SkyPriorMode { uniformPrior = 0, galaxyPrior = 1,  volumePrior = 2};
+
+/**
+ \brief Generate a sky prior mode enum by looking at runtime Flags
+*/
+enum SkyPriorMode get_sky_prior_mode(struct Flags *flags);
+
 /**
  \brief Checks that parameters \f$\vec x\f$ are within prior volume \f$V\f$.
  
@@ -139,7 +164,7 @@ void free_prior(struct Prior *prior);
  @param UCB parameters `params` \f$ \vec x\f$
  @returns \f$ \log p(\vec x)\f$
  */
-double evaluate_prior(struct Flags *flags, struct Data *data, struct Model *model, struct Prior *prior, double *params);
+double evaluate_prior(struct Flags *flags, struct Data *data, struct Model *model, struct Prior *prior, struct Source *source);
 
 
 /**
@@ -162,7 +187,9 @@ double evaluate_snr_prior(struct Data *data, struct Model *model, double *params
  @param UCB parameters `params` \f$ \vec x\f$
  @returns \f$ \log p({\vec\Omega})\f$
  */
-double evalaute_sky_location_prior(double *params, double **uniform_prior, double *logPriorVolume, int galaxyFlag, double *skyhist, double dcostheta, double dphi, int nphi);
+double evaluate_sky_location_prior(double *params, double **uniform_prior, double *logPriorVolume, enum SkyPriorMode galaxyFlag, double *skyhist, double dcostheta, double dphi, int nphi);
+
+double evaluate_volume_prior(struct Prior *prior, struct Source *source);
 
 /**
  \brief Computes uniform prior for parameters \f$\vec x\f$
@@ -176,5 +203,64 @@ double evaluate_uniform_priors(double *params, double **uniform_prior, double *l
 double evaluate_gmm_prior(struct Data *data, struct GMM *gmm, double *params);
 
 
+/*
+ These are here because they are called in inner loops, and across source files
+ They ought be inlined by the compiler. In C this requires 'static inline' storage
+ specifiers to ensure correct behavior between GNU C and ISO C, and that the full
+ implementation be present in every translation unit (source file) the compiler processes
+*/
+/**
+ \brief Rotate earth-origin galactic XYZ coordinates to ecliptic XYZ coordinates
+*/
+static inline void rotate_galtoeclip(double *xg, double *xe)
+{
+    xe[0] = -0.05487556043*xg[0] + 0.4941094278*xg[1] - 0.8676661492*xg[2];
+
+    xe[1] = -0.99382137890*xg[0] - 0.1109907351*xg[1] - 0.00035159077*xg[2];
+
+    xe[2] = -0.09647662818*xg[0] + 0.8622858751*xg[1] + 0.4971471918*xg[2];
+}
+
+/**
+ \brief Convert galactocentric XYZ to a sky position and distance.
+*/
+static inline void galactocentric_to_sky_distance(/*in*/ double x[3], /*out*/ double *phi, /*out*/ double *theta, /*out*/ double *r_ec)
+{
+    double xe[3], xg[3];
+
+    xg[0] = x[0] - GALAXY_RGC;   // solar barycenter is offset from galactic center along x-axis (by convention)
+    xg[1] = x[1];
+    xg[2] = x[2];
+
+    /* Rotate from galactic to ecliptic */
+    rotate_galtoeclip(xg, xe);
+
+    *r_ec = sqrt(xe[0]*xe[0]+xe[1]*xe[1]+xe[2]*xe[2]);
+
+    *theta = M_PI/2.0-acos(xe[2]/(*r_ec));
+
+    *phi = atan2(xe[1],xe[0]);
+
+    if(*phi<0.0) *phi += 2.0*M_PI;
+}
+
+/**
+\brief Uniform draw of sample location within the galactic bounding box
+ */
+static inline void _generate_uniform_galaxy_sample(/*out*/ double * proposed_sample, gsl_rng *r)
+{
+    proposed_sample[0] = (GALAXY_BB_X*0.5)*(-1.0+2.0*gsl_rng_uniform(r));
+    proposed_sample[1] = (GALAXY_BB_Y*0.5)*(-1.0+2.0*gsl_rng_uniform(r));
+    proposed_sample[2] = (GALAXY_BB_Z*0.5)*(-1.0+2.0*gsl_rng_uniform(r));
+}
+
+/**
+\brief Uniform draw of sample location within the galactic bounding box, and return the log of the volume drawn from.
+ */
+static inline double generate_uniform_galaxy_sample(/*out*/ double * proposed_sample, gsl_rng *r)
+{
+    _generate_uniform_galaxy_sample(proposed_sample, r);
+    return  log(GALAXY_BB_X) + log(GALAXY_BB_Y) + log(GALAXY_BB_Z);
+}
 
 #endif /* GalacticBinaryPrior_h */

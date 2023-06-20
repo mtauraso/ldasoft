@@ -188,6 +188,12 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
                 {
                     fprintf(stderr,"source->params[%i]=%g\n",k,source->params[k]);
                 }
+                fprintf(stderr, "source->Mc=%g\n",source->Mc);
+                fprintf(stderr, "source->D=%g\n",source->D);
+                fprintf(stderr, "source->X=%g\n",source->X);
+                fprintf(stderr, "source->Y=%g\n",source->Y);
+                fprintf(stderr, "source->Z=%g\n",source->Z);
+                
                 source->fisher_matrix[i][j] = 10.0;
             }
             source->fisher_matrix[j][i] = source->fisher_matrix[i][j];
