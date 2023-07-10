@@ -370,7 +370,7 @@ double draw_from_volume_prior_uniform(struct Data *data, struct Source *source, 
     params[2] = phi;
 
     // This is a kludge. The convention replicated here is in map_array_to_params()
-    params[3] = log(galactic_binary_Amp(Mc, params[0]/data->T, r_ec));
+    params[3] = log(galactic_binary_Amp(Mc, params[0]/data->T, r_ec*1000));
 
     // Pack params we may need later in prior_density and evaluate_prior logic
     // xcxc Do we really need all these? Can we cut the fat here?
@@ -417,7 +417,7 @@ double draw_from_uniform_prior(struct Data *data, struct Model *model, struct So
     return logQ;
 }
 
-double draw_from_extrinsic_prior(UNUSED struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
+double draw_from_extrinsic_prior(UNUSED struct Data *data, struct Model *model, struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
 {
     double logP = 0.0;
 
@@ -427,6 +427,16 @@ double draw_from_extrinsic_prior(UNUSED struct Data *data, struct Model *model, 
         if(n >= 7) continue; // skip f-dot and f-double-dot
 
         logP -= draw_uniform_parameter(n, model->prior[n][0], model->prior[n][1], model->logPriorVolume[n], params, seed);
+    }
+
+    // xcxc TODO volume prior. If our source had a sky location ... we just changed it
+    // need to re-figure source->XYZ based on new sky location, keeping D const
+    if (source->D != 0.0) {
+        double x[3];
+        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
+        source->X = x[0];
+        source->Y = x[1];
+        source->Z = x[2];
     }
 
     return logP;
@@ -592,6 +602,26 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
         }
     }
     
+    //xcxc TODO volume prior
+    // We changed amplitude and sky location. Fixup distance holding Mc constant
+    // Then Fixup source->XYZ keeping distance constant.
+    if (source->D != 0.0) {
+
+        // This is a kludge. The convention replicated here is in map_array_to_params()
+        double f0 = params[0]/data->T;
+        double A = exp(params[3]);
+
+        // Figure distance based on amplitude in KPC
+        source->D = galactic_binary_dL_from_Mc(f0, A, source->Mc)/1000;
+
+        // Figure 3d position based on computed distance
+        double x[3];
+        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
+        source->X = x[0];
+        source->Y = x[1];
+        source->Z = x[2];
+    }
+
     //not updating Fisher between moves, proposal is symmetric
     return 0.0;
 }
@@ -1804,6 +1834,17 @@ double draw_from_fstatistic(struct Data *data, UNUSED struct Model *model, UNUSE
     params[0] = q;
     params[1] = costheta;
     params[2] = phi;
+
+    //xcxc TODO volume prior
+    // We changed sky location. Fixup source->XYZ keeping distance constant.
+    if (source->D != 0.0) {
+        double x[3];
+        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
+        source->X = x[0];
+        source->Y = x[1];
+        source->Z = x[2];
+    }
+
     
     logP = evaluate_fstatistic_proposal(data, model, source, proposal, params);
     
@@ -1870,6 +1911,16 @@ double jump_from_fstatistic(struct Data *data, struct Model *model, struct Sourc
     params[0] = q;
     params[1] = costheta;
     params[2] = phi;
+
+    //xcxc TODO volume prior
+    // We changed sky location. Fixup source->XYZ keeping distance constant.
+    if (source->D != 0.0) {
+        double x[3];
+        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
+        source->X = x[0];
+        source->Y = x[1];
+        source->Z = x[2];
+    }
     
     logP = evaluate_fstatistic_proposal(data, model, source, proposal, params);
     

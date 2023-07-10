@@ -722,9 +722,13 @@ void alloc_source(struct Source *source, int NFFT, int Nchannel, int NP)
     source->cosi=0.0;
     source->phi0=0.0;
     
-    source->D=1.0;
+    source->D=0.0;
     source->phi=0.0;
     source->costheta=0.0;
+
+    source->X=0.0;
+    source->Y=0.0;
+    source->Z=0.0;
     
     //Derived
     source->amp=1.;
@@ -775,6 +779,10 @@ void copy_source(struct Source *origin, struct Source *copy)
     copy->D        = origin->D;
     copy->phi      = origin->phi;
     copy->costheta = origin->costheta;
+
+    copy->X = origin->X;
+    copy->Y = origin->Y;
+    copy->Z = origin->Z;
     
     //Derived
     copy->amp    = origin->amp;

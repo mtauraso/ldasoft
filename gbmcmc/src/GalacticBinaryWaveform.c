@@ -55,6 +55,11 @@ double galactic_binary_Mc(double f0, double dfdt)
 
     return pow(fd/(96./5.)/pi83/pow(f,11./3.), 3./5.)/TSUN;
 }
+double galactic_binary_dL_from_Mc(double f0, double A, double Mc) {
+    double f = f0;
+    double M = Mc * TSUN;
+    return 2.0*(CLIGHT/PC)*pow(pow(M,5)*pow(M_PI*f,2),1./3.)/A;
+}
 
 double galactic_binary_dL(double f0, double dfdt, double A)
 {

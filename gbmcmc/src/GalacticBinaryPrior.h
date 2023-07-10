@@ -222,6 +222,18 @@ static inline void rotate_galtoeclip(double *xg, double *xe)
 }
 
 /**
+ \brief Rotate ecliptic XYZ coordinates to earth-origin galactic XYZ coordinates
+*/
+static inline void rotate_ecliptogal(double *xg, double *xe)
+{
+    xe[0] = -0.05487556043*xg[0] - 0.99382137890*xg[1] - 0.09647662818*xg[2];
+
+    xe[1] =  0.4941094278*xg[0]  - 0.1109907351*xg[1]  + 0.8622858751*xg[2];
+
+    xe[2] = -0.8676661492*xg[0]  - 0.00035159077*xg[1] + 0.4971471918*xg[2];
+}
+
+/**
  \brief Convert galactocentric XYZ to a sky position and distance.
 */
 static inline void galactocentric_to_sky_distance(/*in*/ double x[3], /*out*/ double *phi, /*out*/ double *theta, /*out*/ double *r_ec)
@@ -242,6 +254,30 @@ static inline void galactocentric_to_sky_distance(/*in*/ double x[3], /*out*/ do
     *phi = atan2(xe[1],xe[0]);
 
     if(*phi<0.0) *phi += 2.0*M_PI;
+}
+
+/**
+ \brief Convert sky position and distance to a galactocentric XYZ
+*/
+static inline void sky_distance_to_galactocentric(/*out*/ double x[3], /*in*/ double phi, /*in*/ double theta, /*in*/ double r_ec)
+{
+    double xe[3], xg[3];
+
+    // Shift theta to be azimuthal angle to z axis rather than an elevation from xy plane
+    theta = M_PI/2.0 - theta;
+
+    // Convert to ecliptic xyz
+    xe[0] = r_ec * cos(phi) * sin(theta);
+    xe[1] = r_ec * sin(phi) * sin(theta);
+    xe[2] = r_ec * cos(theta);
+
+    // Rotate to galactic
+    rotate_ecliptogal(xe, xg);
+
+    // Solar barycenter is offset from galactic center along x axis
+    x[0] = xg[0] + GALAXY_RGC;
+    x[1] = xg[1];
+    x[2] = xg[2];
 }
 
 /**

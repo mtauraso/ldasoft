@@ -66,6 +66,19 @@ double galactic_binary_Mc(double f0, double dfdt);
 double galactic_binary_dL(double f0, double dfdt, double A);
 
 /**
+ \brief Compute luminosity distance from Amplitude and chirp mass
+
+ This is swapping A for D in galactic_binary_Amp.
+
+ @param f0 initial GW frequency: \f$ f_0\ [{\rm Hz}]\f$
+ @param A gravitational wave amplitude: \f$ \mathcal{A} \f$
+ @param Mc chirp mass: \f$\mathcal{M}\ [{\rm M}_\odot]\f$
+
+ @return \f$ D_L = 2 \frac{ \mathcal{M}^{5/3} (\pi f_0)^{2/3} }{\mathcal{A}} \f$
+ */
+double galactic_binary_dL_from_Mc(double f0, double A, double Mc);
+
+/**
  \brief computes Fisher Information Matrix for UCB waveform parameters Source::params
  
  Computes matrix elements numerically using central differencing

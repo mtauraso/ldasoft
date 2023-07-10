@@ -173,10 +173,14 @@ static inline int lookup_volume_prior(struct Prior *prior, double* location) {
     int By = (int)((location[1] + GALAXY_BB_Y*0.5) / (prior->dy));
     int Bz = (int)((location[2] + GALAXY_BB_Z*0.5) / (prior->dz));
 
+    if(Bx < 0 || By < 0 || Bz < 0) {
+        printf("Out of bounds access to volhist: %d %d %d\n", Bx, By, Bz);
+    }
+
     int voxel_idx = Bx*prior->ny*prior->nz + By*prior->nz + Bz;
 
     if(voxel_idx < 0 || voxel_idx > prior->nx*prior->ny*prior->nz) {
-        printf("Out of bounds access to volhist: %d %d %d\n", Bx, By, Bz);
+        printf("Out of bounds access to volhist: %d %d %d -> %d\n", Bx, By, Bz, voxel_idx);
     }
 
     return voxel_idx;
@@ -816,9 +820,25 @@ double evaluate_volume_prior(struct Prior *prior, struct Source *source) {
     double logP;
     double location[3];
 
+    // xcxc
+    // TODO. If source was not drawn by volume prior we won't have X/Y/Z
+    // Therefore we need to compute X,Y,Z from R, costheta, phi?
+    // aaaahhh we don't have r though... uh... ok shit
+    //
+    // I guess when volumeprior is enabled... *every* source draw function
+    // needs to define where in 3d a source is.
     location[0] = source->X;
     location[1] = source->Y;
     location[2] = source->Z;
+
+    // TODO: Find something better to do with this case
+    // If the source is outside the glactic bounding box simply ignore it
+    if(source->X < -GALAXY_BB_X*0.5 || source->X > GALAXY_BB_X*0.5 ||
+       source->Y < -GALAXY_BB_Y*0.5 || source->Y > GALAXY_BB_Y*0.5 ||
+       source->Z < -GALAXY_BB_Z*0.5 || source->Z > GALAXY_BB_Z*0.5) {
+
+        return -INFINITY;
+    }
 
     // get the density from the voxel in use
     logP = prior->volhist[lookup_volume_prior(prior, location)];
