@@ -225,9 +225,6 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
                 }
                 fprintf(stderr, "source->Mc=%g\n",source->Mc);
                 fprintf(stderr, "source->D=%g\n",source->D);
-                fprintf(stderr, "source->X=%g\n",source->X);
-                fprintf(stderr, "source->Y=%g\n",source->Y);
-                fprintf(stderr, "source->Z=%g\n",source->Z);
                 
                 source->fisher_matrix[basisindex][i][j] = 10.0;
             }

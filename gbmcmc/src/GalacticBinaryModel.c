@@ -39,32 +39,50 @@
 
 void map_array_to_params(struct Source *source, double *params, double T)
 {
-    source->f0       = params[0]/T;
-    source->costheta = params[1];
-    source->phi      = params[2];
-    source->amp      = exp(params[3]);
-    source->cosi     = params[4];
-    source->psi      = params[5];
-    source->phi0     = params[6];
-    if(source->NP>7)
-        source->dfdt   = params[7]/(T*T);
-    if(source->NP>8)
-        source->d2fdt2 = params[8]/(T*T*T);
+    source->f0       = params[F0]/T;
+    source->costheta = params[COSTHETA];
+    source->phi      = params[PHI];
+    if(is_param(AMP))
+        source->amp      = exp(params[AMP]);
+        // Note that when in amplitude only mode there is no
+        // unambiguous way to calculate Mc and D, without assuming a
+        // detached binary.
+    if(is_param(DIST) && is_param(MC)) {
+        source->amp = galactic_binary_Amp(params[MC], source->f0, params[DIST]);
+        source->Mc  = params[MC];
+        source->D   = params[DIST];
+    }
+    source->cosi     = params[COSI];
+    source->psi      = params[PSI];
+    source->phi0     = params[PHI0];
+    if(is_param(DFDT))
+        source->dfdt   = params[DFDT]/(T*T);
+    if(is_param(DFDTASTRO) && is_param(MC)) 
+        source->dfdt   = params[DFDTASTRO]/(T*T) + galactic_binary_fdot(params[MC], source->f0);
+    if(is_param(D2FDT2))
+        source->d2fdt2 = params[D2FDT2]/(T*T*T);
 }
 
 void map_params_to_array(struct Source *source, double *params, double T)
 {
-    params[0] = source->f0*T;
-    params[1] = source->costheta;
-    params[2] = source->phi;
-    params[3] = log(source->amp);
-    params[4] = source->cosi;
-    params[5] = source->psi;
-    params[6] = source->phi0;
-    if(source->NP>7)
-        params[7] = source->dfdt*T*T;
-    if(source->NP>8)
-        params[8] = source->d2fdt2*T*T*T;
+    params[F0] = source->f0*T;
+    params[COSTHETA] = source->costheta;
+    params[PHI] = source->phi;
+    if(is_param(AMP))
+        params[AMP] = log(source->amp);
+    params[COSI] = source->cosi;
+    params[PSI] = source->psi;
+    params[PHI0] = source->phi0;
+    if(is_param(DFDT))
+        params[DFDT] = source->dfdt*T*T;
+    if(is_param(DIST))
+        params[DIST] = source->D;
+    if(is_param(MC))
+        params[MC] = source->Mc;
+    if(is_param(DFDTASTRO) && is_param(MC))
+        params[DFDTASTRO] = (source->dfdt - galactic_binary_fdot(source->Mc, source->f0))*T*T;
+    if(is_param(D2FDT2))
+        params[D2FDT2] = source->d2fdt2*T*T*T;
 }
 
 void alloc_data(struct Data *data, struct Flags *flags)
@@ -726,10 +744,6 @@ void alloc_source(struct Source *source, int NFFT, int Nchannel, int NP)
     source->D=0.0;
     source->phi=0.0;
     source->costheta=0.0;
-
-    source->X=0.0;
-    source->Y=0.0;
-    source->Z=0.0;
     
     //Derived
     source->amp=1.;
@@ -800,10 +814,6 @@ void copy_source(struct Source *origin, struct Source *copy)
     copy->D        = origin->D;
     copy->phi      = origin->phi;
     copy->costheta = origin->costheta;
-
-    copy->X = origin->X;
-    copy->Y = origin->Y;
-    copy->Z = origin->Z;
     
     //Derived
     copy->amp    = origin->amp;

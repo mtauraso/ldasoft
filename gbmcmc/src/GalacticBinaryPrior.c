@@ -21,6 +21,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <assert.h>
 
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_sort.h>
@@ -131,11 +132,6 @@ static inline void alloc_volume_prior(struct Prior * prior, int Nx, int Ny, int 
     prior->dx = GALAXY_BB_X/Nx;
     prior->dy = GALAXY_BB_Y/Ny;
     prior->dz = GALAXY_BB_Z/Nz;
-
-    // Our bundled prior on M_chirp
-    prior->Mcmin = 0.15;
-    prior->Mcmax = 10;
-    prior->McLogVolume = log(prior->Mcmax-prior->Mcmin);
 }
 
 // Called by galactic prior generator mcmc to sample the chain to generate the sky prior
@@ -406,14 +402,16 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
 void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *data, int verbose)
 {
     /*
-     params[0] = source->f0*T;
-     params[1] = source->costheta;
-     params[2] = source->phi;
-     params[3] = log(source->amp);
-     params[4] = source->cosi;
-     params[5] = source->psi;
-     params[6] = source->phi0;
-     params[7] = source->dfdt*T*T;
+     params[F0] = source->f0*T;
+     params[COSTHETA] = source->costheta;
+     params[PHI] = source->phi;
+     params[AMP] = log(source->amp);
+     params[COSI] = source->cosi;
+     params[PSI] = source->psi;
+     params[PHI0] = source->phi0;
+     params[DFDT] = source->dfdt*T*T;
+     
+     See map_array_to_params and map_params_to_array for other parameters.
      */
     
     
@@ -428,38 +426,55 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     //TODO: assign priors by parameter name, use mapper to get into vector (more robust to changes)
     
     //frequency bin
-    model->prior[0][0] = data->qmin;
-    model->prior[0][1] = data->qmax;
+    model->prior[F0][0] = data->qmin;
+    model->prior[F0][1] = data->qmax;
     
     //colatitude
-    model->prior[1][0] = -1.0;
-    model->prior[1][1] =  1.0;
+    model->prior[COSTHETA][0] = -1.0;
+    model->prior[COSTHETA][1] =  1.0;
     
     //longitude
-    model->prior[2][0] = 0.0;
-    model->prior[2][1] = PI2;
+    model->prior[PHI][0] = 0.0;
+    model->prior[PHI][1] = PI2;
     
-    //log amplitude
-    model->prior[3][0] = -60.0;
-    model->prior[3][1] = -45.0;
+    if(is_param(AMP)) {
+        //log amplitude
+        model->prior[AMP][0] = -60.0;
+        model->prior[AMP][1] = -45.0;
+    }
     
     //cos inclination
-    model->prior[4][0] = -1.0;
-    model->prior[4][1] =  1.0;
+    model->prior[COSI][0] = -1.0;
+    model->prior[COSI][1] =  1.0;
     
     //polarization
-    model->prior[5][0] = 0.0;
-    model->prior[5][1] = M_PI;
+    model->prior[PSI][0] = 0.0;
+    model->prior[PSI][1] = M_PI;
     
     //phase
-    model->prior[6][0] = 0.0;
-    model->prior[6][1] = PI2;
+    model->prior[PHI0][0] = 0.0;
+    model->prior[PHI0][1] = PI2;
     
+    double Mcmin = 0.15;
+    double Mcmax = 1.00;
+    if(is_param(MC)) {
+        model->prior[MC][0] = Mcmin;
+        model->prior[MC][1] = Mcmax;
+    }
+
+    // We should never (yet?) be using a uniform prior on distance
+    // If in use it should always be drawn from a 3d volume.
+    // Setting to NaN helps errors in code become visible.
+    if(is_param(DIST)) {
+        model->prior[DIST][0] = NAN;
+        model->prior[DIST][1] = NAN;
+    }
+
     //fdot (bins/Tobs)
     
     /* frequency derivative priors are a little trickier...*/
-    double fmin = model->prior[0][0]/data->T;
-    double fmax = model->prior[0][1]/data->T;
+    double fmin = model->prior[F0][0]/data->T;
+    double fmax = model->prior[F0][1]/data->T;
     
     /* emprical envelope functions from Gijs' MLDC catalog */
     double fdotmin = -0.000005*pow(fmin,(13./3.));
@@ -468,16 +483,22 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     /* unphysically broad priors
     double fdotmin = -pow(fmin,(13./3.));
     double fdotmax = pow(fmax,(13./3.)); */
-     
-    
+
     /* use prior on chirp mass to convert to priors on frequency evolution */
+    /* driven by gravitational waves alone*/
+    double fdotgrmin = galactic_binary_fdot(Mcmin, fmin);
+    double fdotgrmax = galactic_binary_fdot(Mcmax, fmax); 
+    
+    // Ensure our prior on fdotastro allows you to hit the full range of values
+    // when calculating fdot = fdot_gr + fdot_astro
+    double fdotastromin = fdotmin - fdotgrmax;
+    double fdotastromax = fdotmax - fdotgrmin;
+    
+    
     if(flags->detached)
     {
-        double Mcmin = 0.15;
-        double Mcmax = 1.00;
-        
-        fdotmin = galactic_binary_fdot(Mcmin, fmin);
-        fdotmax = galactic_binary_fdot(Mcmax, fmax);
+        fdotmin = fdotgrmin;
+        fdotmax = fdotgrmax;
     }
     
     double fddotmin = 11.0/3.0*fdotmin*fdotmin/fmax;
@@ -487,25 +508,51 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     {
         fddotmin = -fddotmax;
     }
+
+
     if(verbose && !flags->quiet)
     {
         fprintf(stdout,"\n============== PRIORS ==============\n");
         if(flags->detached)fprintf(stdout,"  Assuming detached binary, Mchirp = [0.15,1]\n");
+        
+        if(is_param(DFDT))
         fprintf(stdout,"  p(fdot)  = U[%g,%g]\n",fdotmin,fdotmax);
+
+        if(is_param(DFDTASTRO))
+        fprintf(stdout,"  p(fdot)  = U[%g,%g]\n",fdotastromin,fdotastromax);
+        
+        if(is_param(D2FDT2))
         fprintf(stdout,"  p(fddot) = U[%g,%g]\n",fddotmin,fddotmax);
-        fprintf(stdout,"  p(lnA)   = U[%g,%g]\n",model->prior[3][0],model->prior[3][1]);
+
+        if(is_param(AMP)) 
+        fprintf(stdout,"  p(lnA)   = U[%g,%g]\n",model->prior[AMP][0],model->prior[AMP][1]);
+
+        if(is_param(MC)) 
+        fprintf(stdout,"  p(Mc)    = U[%g,%g]\n",model->prior[MC][0],model->prior[MC][1]);
         fprintf(stdout,"====================================\n\n");
     }
     
-    if(data->NP>7)
+    if(is_param(DFDT))
     {
-        model->prior[7][0] = fdotmin*data->T*data->T;
-        model->prior[7][1] = fdotmax*data->T*data->T;
+        model->prior[DFDT][0] = fdotmin*data->T*data->T;
+        model->prior[DFDT][1] = fdotmax*data->T*data->T;
     }
-    if(data->NP>8)
+
+    if(is_param(DFDTASTRO)) {
+        if(flags->detached) {
+            // in detached mode fdot from astrophysical sources is zero
+            model->prior[DFDTASTRO][0] = 0.0;
+            model->prior[DFDTASTRO][1] = 0.0;
+        } else {        
+            model->prior[DFDTASTRO][0] = fdotastromin*data->T*data->T;
+            model->prior[DFDTASTRO][1] = fdotastromax*data->T*data->T;
+        }
+    }
+
+    if(is_param(D2FDT2))
     {
-        model->prior[8][0] = fddotmin*data->T*data->T*data->T;
-        model->prior[8][1] = fddotmax*data->T*data->T*data->T;
+        model->prior[D2FDT2][0] = fddotmin*data->T*data->T*data->T;
+        model->prior[D2FDT2][1] = fddotmax*data->T*data->T*data->T;
     }
     
     /*
@@ -527,69 +574,134 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
         FILE *priorFile = fopen(flags->pdfFile,"r");
         char name[16];
         double min,max;
+        bool parse_error = false;
         
         while(fscanf(priorFile,"%s %lg %lg",name,&min,&max) != EOF)
         {
             
             if(strcmp("f0",name) == 0)
             {
-                model->prior[0][0] = min*data->T;
-                model->prior[0][1] = max*data->T;
-            }
-            
-            else if(strcmp("dfdt",name) == 0)
-            {
-                model->prior[7][0] = min*data->T*data->T;
-                model->prior[7][1] = max*data->T*data->T;
-            }
-            
-            else if(strcmp("amp",name) == 0)
-            {
-                model->prior[3][0] = log(min);
-                model->prior[3][1] = log(max);
-            }
-            
-            else if(strcmp("phi",name) == 0)
-            {
-                model->prior[2][0] = min;
-                model->prior[2][1] = max;
+                model->prior[F0][0] = min*data->T;
+                model->prior[F0][1] = max*data->T;
             }
             
             else if(strcmp("costheta",name) == 0)
             {
-                model->prior[1][0] = min;
-                model->prior[1][1] = max;
+                model->prior[COSTHETA][0] = min;
+                model->prior[COSTHETA][1] = max;
+            }
+            
+            else if(strcmp("phi",name) == 0)
+            {
+                model->prior[PHI][0] = min;
+                model->prior[PHI][1] = max;
+            }
+
+            else if(strcmp("amp",name) == 0 && is_param(AMP))
+            {
+                model->prior[AMP][0] = log(min);
+                model->prior[AMP][1] = log(max);
+            }
+            else if(strcmp("amp",name) == 0)
+            {
+                fprintf(stderr,"amp specified in EM prior file, but in the given command line that is not a search parameter\n");
+                parse_error = true;
             }
             
             else if(strcmp("cosi",name) == 0)
             {
-                model->prior[4][0] = min;
-                model->prior[4][1] = max;
+                model->prior[COSI][0] = min;
+                model->prior[COSI][1] = max;
             }
             
             else if(strcmp("psi",name) == 0)
             {
-                model->prior[5][0] = min;
-                model->prior[5][1] = max;
+                model->prior[PSI][0] = min;
+                model->prior[PSI][1] = max;
             }
             
             else if(strcmp("phi0",name) == 0)
             {
-                model->prior[6][0] = min;
-                model->prior[6][1] = max;
+                model->prior[PHI0][0] = min;
+                model->prior[PHI0][1] = max;
+            }
+
+            else if(strcmp("dfdt",name) == 0 && is_param(DFDT))
+            {
+                model->prior[DFDT][0] = min*data->T*data->T;
+                model->prior[DFDT][1] = max*data->T*data->T;
+            }
+            else if(strcmp("dfdt",name) == 0) 
+            {
+                fprintf(stderr,"dfdt specified in EM prior file, but in the given command line that is not a search parameter\n");
+                parse_error = true;
+            }
+
+            else if(strcmp("d2fdt2",name) == 0 && is_param(D2FDT2))
+            {
+                model->prior[D2FDT2][0] = min*data->T*data->T*data->T;
+                model->prior[D2FDT2][1] = max*data->T*data->T*data->T;
+            }
+            else if(strcmp("d2fdt2",name) == 0)
+            {
+                fprintf(stderr,"d2fdt2 specified in EM prior file, but in the given command line that is not a search parameter\n");
+                parse_error = true;
+            }
+
+            else if(strcmp("dist",name) == 0 && is_param(DIST))
+            {
+                model->prior[DIST][0] = min;
+                model->prior[DIST][1] = max;
+            }
+            else if(strcmp("dist",name) == 0)
+            {
+                fprintf(stderr,"dist specified in EM prior file, but in the given command line that is not a search parameter\n");
+                parse_error = true;
+            }
+
+            else if(strcmp("mchirp",name) == 0 && is_param(MC))
+            {
+                model->prior[DIST][0] = min;
+                model->prior[DIST][1] = max;
+            }
+            else if(strcmp("mchirp",name) == 0)
+            {
+                fprintf(stderr,"mchirp specified in EM prior file, but in the given command line that is not a search parameter\n");
+                parse_error = true;
+            }
+
+            else if(strcmp("dfdtastro",name) == 0 && is_param(DFDTASTRO))
+            {
+                model->prior[DFDTASTRO][0] = min*data->T*data->T;
+                model->prior[DFDTASTRO][1] = max*data->T*data->T;
+            }
+            else if(strcmp("dfdtastro",name) == 0) 
+            {
+                // TODO: xcxc
+                // If mchirp, dfdt, f0 have given priors we can technically calculate a range as is done
+                // for the in-built prior rather than erroring out.
+                fprintf(stderr,"dfdtastro specified in EM prior file, but in the given command line that is not a search parameter\n");
+                parse_error = true;
             }
             
             else
             {
                 fprintf(stdout, "unrecognized parameter in prior file: %s\n",name);
+                parse_error = true;
             }      
         }
-        
+
         fclose(priorFile);
+        if(parse_error) exit(1);
     }
     
     //set prior volume
-    for(int n=0; n<data->NP; n++) model->logPriorVolume[n] = log(model->prior[n][1]-model->prior[n][0]);
+    for(int n=0; n<data->NP; n++) {
+        // Prior volume for distance is handled in draw_from_galaxy_prior.
+        // xcxc check function name is correct  here ^^
+        if(n == DIST) model->logPriorVolume[n] = 0.0;
+        else model->logPriorVolume[n] = log(model->prior[n][1]-model->prior[n][0]);
+    }
     
 }
 
@@ -605,34 +717,42 @@ int check_range(double *params, double **uniform_prior, int NP)
     for(int n=0; n<NP; n++) if(params[n]!=params[n]) return 1;
     
     //frequency bin (uniform)
-    if(params[0]<uniform_prior[0][0] || params[0]>uniform_prior[0][1]) return 1;
+    if(params[F0]<uniform_prior[F0][0] || params[F0]>uniform_prior[F0][1]) return 1;
     
     //cosine co-latitude
-    if(params[1]<uniform_prior[1][0] || params[1]>uniform_prior[1][1]) return 1;
+    if(params[COSTHETA]<uniform_prior[COSTHETA][0] || params[COSTHETA]>uniform_prior[COSTHETA][1]) return 1;
 
     //longitude
-    if(params[2]<uniform_prior[2][0] || params[2]>=uniform_prior[2][1])
+    if(params[PHI]<uniform_prior[PHI][0] || params[PHI]>=uniform_prior[PHI][1])
     {
-        params[2] = atan2(sin(params[2]),cos(params[2]));
-        if(params[2] < 0.0) params[2] += PI2;
+        params[PHI] = atan2(sin(params[PHI]),cos(params[PHI]));
+        if(params[PHI] < 0.0) params[PHI] += PI2;
     }
 
     //cosine inclination
-    if(params[4]<uniform_prior[4][0] || params[4]>uniform_prior[4][1]) return 1;
+    if(params[COSI]<uniform_prior[COSI][0] || params[COSI]>uniform_prior[COSI][1]) return 1;
     
     //polarization
-    while(params[5]<uniform_prior[5][0]) params[5] += M_PI;
-    while(params[5]>uniform_prior[5][1]) params[5] -= M_PI;
+    while(params[PSI]<uniform_prior[PSI][0]) params[PSI] += M_PI;
+    while(params[PSI]>uniform_prior[PSI][1]) params[PSI] -= M_PI;
 
     //phase
-    while(params[6]<uniform_prior[6][0]) params[6] += PI2;
-    while(params[6]>uniform_prior[6][1]) params[6] -= PI2;
+    while(params[PHI0]<uniform_prior[PHI0][0]) params[PHI0] += PI2;
+    while(params[PHI0]>uniform_prior[PHI0][1]) params[PHI0] -= PI2;
     
     //fdot (bins/Tobs)
-    if(NP>7) if(params[7]<uniform_prior[7][0] || params[7]>uniform_prior[7][1]) return 1;
+    if(is_param(DFDT) && (params[DFDT]<uniform_prior[DFDT][0] || params[DFDT]>uniform_prior[DFDT][1])) return 1;
+    if(is_param(DFDTASTRO) && (params[DFDTASTRO]<uniform_prior[DFDTASTRO][0] || params[DFDTASTRO]>uniform_prior[DFDTASTRO][1])) return 1;
     
     //fddot
-    if(NP>8) if(params[8]<uniform_prior[8][0] || params[8]>uniform_prior[8][1]) return 1;
+    if(is_param(D2FDT2) && (params[D2FDT2]<uniform_prior[D2FDT2][0] || params[D2FDT2]>uniform_prior[D2FDT2][1])) return 1;
+
+    //mchirp
+    if(is_param(MC) && (params[MC]<uniform_prior[MC][0] || params[MC]>uniform_prior[MC][1])) return 1;
+
+    // xcxc (is this still true?)
+    // We don't do distance because it needs to be checked that it is inside the bounding box
+    // of the galaxy. It does not really have a uniform prior.
 
     return 0;
 }
@@ -774,10 +894,10 @@ double evaluate_prior(struct Flags *flags, struct Data *data, struct Model *mode
             {
                 logP += evaluate_snr_prior(data, model, params);
             }
-            else
+            else if(is_param(AMP))
             {
-                if(params[3]<uniform_prior[3][0] || params[3]>uniform_prior[3][1]) return -INFINITY;
-                if(!flags->volumePrior) logP -= model->logPriorVolume[3];
+                if(params[AMP]<uniform_prior[AMP][0] || params[AMP]>uniform_prior[AMP][1]) return -INFINITY;
+                logP -= model->logPriorVolume[AMP];
             }
         }
         
@@ -795,22 +915,26 @@ double evaluate_uniform_priors(double *params, double **uniform_prior, double *l
     double logP = 0.0;
     //frequency bin (uniform)
     //TODO: is frequency logPriorVolume up to date?
-    logP -= log(uniform_prior[0][1]-uniform_prior[0][0]);
+    logP -= log(uniform_prior[F0][1]-uniform_prior[F0][0]);
     
     //cosine inclination
-    logP -= logPriorVolume[4];
+    logP -= logPriorVolume[COSI];
     
     //polarization
-    logP -= logPriorVolume[5];
+    logP -= logPriorVolume[PSI];
     
     //phase
-    logP -= logPriorVolume[6];
+    logP -= logPriorVolume[PHI0];
     
     //fdot (bins/Tobs)
-    if(NP>7) logP -= logPriorVolume[7];
+    if(is_param(DFDT)) logP -= logPriorVolume[DFDT];
+    if(is_param(DFDTASTRO)) logP -= logPriorVolume[DFDTASTRO];
     
     //fddot
-    if(NP>8) logP -= logPriorVolume[8];
+    if(is_param(D2FDT2)) logP -= logPriorVolume[D2FDT2];
+
+    // chirp mass
+    if(is_param(MC)) logP -= logPriorVolume[MC];
     
     return logP;
 }
@@ -819,32 +943,21 @@ double evaluate_uniform_priors(double *params, double **uniform_prior, double *l
 double evaluate_volume_prior(struct Prior *prior, struct Source *source) {
     double logP;
     double location[3];
+    double * params = source->params;
 
-    // xcxc
-    // TODO. If source was not drawn by volume prior we won't have X/Y/Z
-    // Therefore we need to compute X,Y,Z from R, costheta, phi?
-    // aaaahhh we don't have r though... uh... ok shit
-    //
-    // I guess when volumeprior is enabled... *every* source draw function
-    // needs to define where in 3d a source is.
-    location[0] = source->X;
-    location[1] = source->Y;
-    location[2] = source->Z;
+    sky_distance_to_galactocentric(location, params[PHI], params[COSTHETA], params[DIST]/1000.0);
 
     // TODO: Find something better to do with this case
     // If the source is outside the glactic bounding box simply ignore it
-    if(source->X < -GALAXY_BB_X*0.5 || source->X > GALAXY_BB_X*0.5 ||
-       source->Y < -GALAXY_BB_Y*0.5 || source->Y > GALAXY_BB_Y*0.5 ||
-       source->Z < -GALAXY_BB_Z*0.5 || source->Z > GALAXY_BB_Z*0.5) {
+    if(location[0] < -GALAXY_BB_X*0.5 || location[0] > GALAXY_BB_X*0.5 ||
+       location[1] < -GALAXY_BB_Y*0.5 || location[1] > GALAXY_BB_Y*0.5 ||
+       location[2] < -GALAXY_BB_Z*0.5 || location[2] > GALAXY_BB_Z*0.5) {
 
         return -INFINITY;
     }
 
     // get the density from the voxel in use
     logP = prior->volhist[lookup_volume_prior(prior, location)];
-
-    // We also drew M_chirp from a uniform prior
-    logP -= prior->McLogVolume;
 
     return logP;
 }
@@ -855,22 +968,22 @@ double evaluate_sky_location_prior(double *params, double **uniform_prior, doubl
     double logP = 0.0;
     if(galaxyFlag==galaxyPrior)
     {
-        if(params[1]<uniform_prior[1][0] || params[1]>uniform_prior[1][1]) return -INFINITY;
+        if(params[COSTHETA]<uniform_prior[COSTHETA][0] || params[COSTHETA]>uniform_prior[COSTHETA][1]) return -INFINITY;
         
-        if(uniform_prior[2][0] > 0.0 || uniform_prior[2][1] < PI2)
+        if(uniform_prior[PHI][0] > 0.0 || uniform_prior[PHI][1] < PI2)
         {
             //rejection sample on reduced prior range
-            if(params[2]<uniform_prior[2][0] || params[2]>uniform_prior[2][1]) return -INFINITY;
+            if(params[PHI]<uniform_prior[PHI][0] || params[PHI]>uniform_prior[PHI][1]) return -INFINITY;
         }
         else
         {
             //periodic boundary conditions for full range
-            while(params[2] < 0  ) params[2] += PI2;
-            while(params[2] > PI2) params[2] -= PI2;
+            while(params[PHI] < 0  ) params[PHI] += PI2;
+            while(params[PHI] > PI2) params[PHI] -= PI2;
         }
         //map costheta and phi to index of skyhist array
-        int i = (int)floor((params[1]-uniform_prior[1][0])/dcostheta);
-        int j = (int)floor((params[2]-uniform_prior[2][0])/dphi);
+        int i = (int)floor((params[COSTHETA]-uniform_prior[COSTHETA][0])/dcostheta);
+        int j = (int)floor((params[PHI]-uniform_prior[PHI][0])/dphi);
         
         int k = i*nphi + j;
         
@@ -883,24 +996,24 @@ double evaluate_sky_location_prior(double *params, double **uniform_prior, doubl
     else if(galaxyFlag==uniformPrior)
     {
         //colatitude (reflective)
-        if(params[1]<uniform_prior[1][0] || params[1]>uniform_prior[1][1]) return -INFINITY;
-        else logP -= logPriorVolume[1];
+        if(params[COSTHETA]<uniform_prior[COSTHETA][0] || params[COSTHETA]>uniform_prior[COSTHETA][1]) return -INFINITY;
+        else logP -= logPriorVolume[COSTHETA];
         
         //longitude (periodic)
-        if(uniform_prior[2][0] > 0.0 || uniform_prior[2][1] < PI2)
+        if(uniform_prior[PHI][0] > 0.0 || uniform_prior[PHI][1] < PI2)
         {
             //rejection sample on reduced prior range
-            if(params[2]<uniform_prior[2][0] || params[2]>uniform_prior[2][1]) return -INFINITY;
+            if(params[PHI]<uniform_prior[PHI][0] || params[PHI]>uniform_prior[PHI][1]) return -INFINITY;
         }
         else
         {
-            if(params[2]<uniform_prior[2][0] || params[2]>=uniform_prior[2][1])
+            if(params[PHI]<uniform_prior[PHI][0] || params[PHI]>=uniform_prior[PHI][1])
             {
-                params[2] = atan2(sin(params[2]),cos(params[2]));
-                if(params[2] < 0.0) params[2] += PI2;
+                params[PHI] = atan2(sin(params[PHI]),cos(params[PHI]));
+                if(params[PHI] < 0.0) params[PHI] += PI2;
             }
         }
-        logP -= logPriorVolume[2];
+        logP -= logPriorVolume[PHI];
     }
     return logP;
 }
@@ -910,7 +1023,7 @@ double evaluate_sky_location_prior(double *params, double **uniform_prior, doubl
 double evaluate_snr_prior(struct Data *data, struct Model *model, double *params)
 {
     //check that frequency is in range
-    int n = (int)floor(params[0] - model->prior[0][0]);
+    int n = (int)floor(params[F0] - model->prior[F0][0]);
     if(n<0 || n>=data->N) return -INFINITY;
     
     //calculate noise model estimate
@@ -922,7 +1035,8 @@ double evaluate_snr_prior(struct Data *data, struct Model *model, double *params
         sf *= asin(data->sine_f_on_fstar);
         
     //get GW amplitude
-    double amp = exp(params[3]);
+    assert(is_param(AMP)); // xcxc todo volume prior check calls to this function
+    double amp = exp(params[AMP]);
     
     double snr = analytic_snr(amp,sn,sf,data->sqT);
     

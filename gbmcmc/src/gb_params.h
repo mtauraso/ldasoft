@@ -42,23 +42,27 @@ extern int NUM_PARAMS;
 //       performance issues in leaf code, these could be converted to a single
 //       int p_Ext2Int and accessed as a bitfield. 
 #define F0             (p_Ext2Int[0])
-#define F0D_ESC        "Principle frequency unitless ratio [Hz*(data duration)^-1]"
+#define F0_DESC        "Principle frequency unitless ratio [Hz*(data duration)^-1]"
 #define COSTHETA       (p_Ext2Int[1])
-#define COSTHETA_DESC  "Sky location Cos of polar angle in elliptic coordinates [-1,1]" // TODO put range, verify measured from z
+#define COSTHETA_DESC  "Sky location Cos of latitude angle in elliptic coordinates dimensionless [-1,1]"
 #define PHI            (p_Ext2Int[2])
-#define PHI_DESC       "Sky location azimuthal angle in elliptic coordinates" // TODO put range and uits
+#define PHI_DESC       "Sky location longitude angle in elliptic coordinates radians [0, 2pi]"
+#define AMP            (p_Ext2Int[3])
+#define AMP_DESC       "Gravitational wave amplitude log(strain)" // TODO Are units right?
 #define COSI           (p_Ext2Int[4])
 #define COSI_DESC      "Inclination Cos of inclination angle to ecliptic [-1,1]" // TODO verify, put range and units
-#define AMP            (p_Ext2Int[3])
-#define AMP_DESC       "Gravitational wave amplitude log(relative displacement)" // TODO Are units right?
 #define PSI            (p_Ext2Int[5])
-#define PSI_DESC       "Polarization angle. Radians" // TODO units and range
+#define PSI_DESC       "Polarization angle. Radians [-pi,pi]" // TODO units and range
 #define PHI0           (p_Ext2Int[6])
-#define PHI0_DESC      "Phase of the binary at observation start." // Todo units and range
+#define PHI0_DESC      "Phase of the binary at observation start radians [0, 2pi]" // Todo units and range
 #define DFDT           (p_Ext2Int[7])
 #define DFDT_DESC      "First derivative of principle frequency of gravitational wave. unitless ratio [Hz * (data duration)^-2]"
 #define D2FDT2         (p_Ext2Int[8])
 #define D2FDT2_DESC    "Second derivative of principle frequency of gravitational wave. unitless ratio [Hz * (data duration)^-3]"
+// Above this line are legacy parameters. If you see a line or comment that says 
+// params[x] where x is some constant, look at the indicies above for its name
+// e.g. params[3] in the old system was AMP.
+// Below this line there should no potential sensitivity of legacy code to the index numbers used.
 #define DIST           (p_Ext2Int[9])
 #define DIST_DESC      "Luminosity distance of source. Measured in pc"
 #define MC             (p_Ext2Int[10])

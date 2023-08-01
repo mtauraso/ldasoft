@@ -91,9 +91,6 @@ struct Prior
     double dx; //!< size of a bin in kpc x direction
     double dy; //!< size of a bin in kpc y direction
     double dz; //!< size of a bin in kpc z direction
-    double Mcmax; // Max for prior on M_chirp
-    double Mcmin; // Min for prior on M_chrip
-    double McLogVolume; // log prior volume for M_chirp
     ///@}
     
     ///@name workspace

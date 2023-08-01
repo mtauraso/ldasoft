@@ -216,9 +216,9 @@ double draw_from_spectrum(struct Data *data, struct Model *model, struct Source 
     int q;
     do
     {
-        params[0] = (double)model->prior[0][0] + gsl_rng_uniform(seed)*(double)(model->prior[0][1]-model->prior[0][0]);
+        params[F0] = (double)model->prior[F0][0] + gsl_rng_uniform(seed)*(double)(model->prior[F0][1]-model->prior[F0][0]);
         alpha     = gsl_rng_uniform(seed)*data->pmax;
-        q = (int)(params[0]-data->qmin);
+        q = (int)(params[F0]-data->qmin);
     }while(data->p[q]<alpha);
 
     //random draws for other parameters
@@ -342,75 +342,46 @@ double draw_from_prior(struct Data *data, struct Model *model, struct Source *so
 }
 #endif
 
-
-static inline double draw_mchirp_uniform(/*in*/ struct Prior *prior, /*out*/ double *Mc, gsl_rng *seed) {
-    *Mc = prior->Mcmin + gsl_rng_uniform(seed) * (prior->Mcmax - prior->Mcmin);
-    return prior->McLogVolume;
-}
-
-// Does the draw from the volume prior and returns the probability associated with that draw.
-// Rejection sampling must happen later, because it isn't happening here.
-// This also handles the M_chirp prior and amplitude.
-double draw_from_volume_prior_uniform(struct Data *data, struct Source *source, struct Prior *prior, double *params, gsl_rng *seed)
-{
-    double x[3];
-    double r_ec, theta, phi;
-    double Mc;
-    double logP = 0.0;
-
-    // Draw uniformly from galactic bounding box.
-    logP += generate_uniform_galaxy_sample(x, seed);
-    galactocentric_to_sky_distance(x, &phi, &theta, &r_ec);
-
-    // Draw uniformly for M_chirp
-    logP += draw_mchirp_uniform(prior, &Mc, seed);
-
-    // Pack the standard representational params
-    params[1] = theta;
-    params[2] = phi;
-
-    // This is a kludge. The convention replicated here is in map_array_to_params()
-    params[3] = log(galactic_binary_Amp(Mc, params[0]/data->T, r_ec*1000));
-
-    // Pack params we may need later in prior_density and evaluate_prior logic
-    // xcxc Do we really need all these? Can we cut the fat here?
-    source->Mc = Mc;
-    source->D = r_ec;
-    source->X = x[0];
-    source->Y = x[1];
-    source->Z = x[2];
-
-    return logP;
-}
-
 static inline double draw_uniform_parameter(int index, double min, double max, double logPriorVolume, double *params, gsl_rng *seed)
 {
     params[index] = min + gsl_rng_uniform(seed) * (max - min);
     return logPriorVolume;
 }
 
+// Does the draw from the volume prior and returns the probability associated with that draw.
+double draw_from_volume_prior_uniform(struct Data *data, struct Model * model, struct Source *source, double *params, gsl_rng *seed)
+{
+    double x[3];
+    double logP = 0.0;
+
+    // Draw uniformly from galactic bounding box.
+    logP += generate_uniform_galaxy_sample(x, seed);
+
+    // convert galactocentric xyz to sky location/distance 
+    galactocentric_to_sky_distance(x, &params[PHI], &params[COSTHETA], &params[DIST]);
+
+    // convert distance from kpc -> pc
+    params[DIST] *= 1000;
+
+    return logP;
+}
+
 double draw_from_uniform_prior(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed)
 {
     double logQ = 0.0;
 
-    // If we are drawing from a 3d galaxy prior we need to unpack and do different things below.
-    struct Prior prior;
-    enum SkyPriorMode skyPriorMode= unpack_prior_proposal(proposal, &prior);
-
     //frequency, sky location, amplitude(skipped), inclination, polarization, phase, fdot (and fdouble-dot)
     for(int n=0; n < source->NP; n++) {
-        // For volume prior sky location and amplitude are drawn different.
-        if(volumePrior && ((n==1) || (n==2) || (n==3))) continue;
+        // For volume prior sky location and distance are drawn differently.
+        if(is_param(DIST) && (n == COSTHETA || n == PHI || n == DIST)) continue;
         // Amplitude is always drawn based on SNR prior
-        if(n == 3) continue; 
+        if(is_param(AMP) && (n == AMP)) continue; 
         logQ -= draw_uniform_parameter(n, model->prior[n][0], model->prior[n][1], model->logPriorVolume[n], params, seed);
     }
 
-    if(skyPriorMode == volumePrior) {
-        logQ -= draw_from_volume_prior_uniform(data, source, &prior, params, seed);
+    if(is_param(DIST)) {
+        logQ -= draw_from_volume_prior_uniform(data, model, source, params, seed);
     } else {
-        //amplitude
-        //n = 3;
         logQ += draw_signal_amplitude(data, model, source, proposal, params, seed);
     }
 
@@ -422,21 +393,13 @@ double draw_from_extrinsic_prior(UNUSED struct Data *data, struct Model *model, 
     double logP = 0.0;
 
     for(int n=0; n < source->NP; n++) {
-        if(n == 0) continue; // skip frequency
-        if(n == 3) continue; // skip amplitude
-        if(n >= 7) continue; // skip f-dot and f-double-dot
+        if(n == F0) continue; // skip frequency
+        if(n == AMP) continue; // skip amplitude
+        if(n == DIST || n == MC) continue; //skip chirp mass and distance (which mostly work like amplitude)
+        if(n == DFDT || n == DFDTASTRO) continue; // skip f-dot
+        if(n == D2FDT2) continue; // skip f-dot and f-double-dot
 
         logP -= draw_uniform_parameter(n, model->prior[n][0], model->prior[n][1], model->logPriorVolume[n], params, seed);
-    }
-
-    // xcxc TODO volume prior. If our source had a sky location ... we just changed it
-    // need to re-figure source->XYZ based on new sky location, keeping D const
-    if (source->D != 0.0) {
-        double x[3];
-        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
-        source->X = x[0];
-        source->Y = x[1];
-        source->Z = x[2];
     }
 
     return logP;
@@ -452,12 +415,12 @@ double draw_from_galaxy_prior(struct Model *model, struct Prior *prior, double *
     do
     {
         //sky location
-        params[1] = model->prior[1][0] + gsl_rng_uniform(seed)*(model->prior[1][1]-model->prior[1][0]);
-        params[2] = model->prior[2][0] + gsl_rng_uniform(seed)*(model->prior[2][1]-model->prior[2][0]);
+        params[COSTHETA] = model->prior[COSTHETA][0] + gsl_rng_uniform(seed)*(model->prior[COSTHETA][1]-model->prior[COSTHETA][0]);
+        params[PHI] = model->prior[PHI][0] + gsl_rng_uniform(seed)*(model->prior[PHI][1]-model->prior[PHI][0]);
         
         //map costheta and phi to index of skyhist array
-        int i = (int)floor((params[1]-uniform_prior[1][0])/prior->dcostheta);
-        int j = (int)floor((params[2]-uniform_prior[2][0])/prior->dphi);
+        int i = (int)floor((params[COSTHETA]-uniform_prior[COSTHETA][0])/prior->dcostheta);
+        int j = (int)floor((params[PHI]-uniform_prior[PHI][0])/prior->dphi);
         
         int k = i*prior->nphi + j;
         
@@ -525,7 +488,7 @@ double draw_calibration_parameters(struct Data *data, struct Model *model, gsl_r
 
 double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
 {
-    int n = (int)floor(params[0] - model->prior[0][0]);
+    int n = (int)floor(params[F0] - model->prior[F0][0]);
     double sf = data->sine_f_on_fstar;
     double sn = model->noise[0]->SnA[n]*model->noise[0]->etaA;
     double SNR1  = analytic_snr(1, sn, sf, data->sqT);
@@ -533,7 +496,8 @@ double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED stru
     
     //Get bounds on SNR
     double SNR = 1.0;
-    double SNRmax = exp(model->prior[3][1])*SNR1;
+    assert(is_param(AMP)); // xcxc todo check calls to this function
+    double SNRmax = exp(model->prior[AMP][1])*SNR1;
     
     //Get max of prior density for rejection sampling
     double maxP = snr_prior(SNRPEAK);
@@ -553,11 +517,11 @@ double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED stru
         //you had your chance
         if(counter>10000)
         {
-            params[3] = log(SNR*iSNR1);
+            params[AMP] = log(SNR*iSNR1);
             return -INFINITY;
         }
     }while(alpha > P);
-    params[3] = log(SNR*iSNR1);
+    params[AMP] = log(SNR*iSNR1);
     return evaluate_snr_prior(data, model, params);
 }
 
@@ -743,16 +707,16 @@ double cov_density(UNUSED struct Data *data, struct Model *model, struct Source 
     
     //map angles over periodic boundary conditions
     //longitude
-    if(params[2]>PI2)  params[2]-=PI2;
-    if(params[2]<0.0)  params[2]+=PI2;
+    if(params[PHI]>PI2)  params[PHI]-=PI2;
+    if(params[PHI]<0.0)  params[PHI]+=PI2;
     
     //phase
-    if(params[6]>PI2)  params[6]-=PI2;
-    if(params[6]<0.0)  params[6]+=PI2;
+    if(params[PHI0]>PI2)  params[PHI0]-=PI2;
+    if(params[PHI0]<0.0)  params[PHI0]+=PI2;
     
     //psi
-    if(params[5]>M_PI) params[5]-=M_PI;
-    if(params[5]<0.0)  params[5]+=M_PI;
+    if(params[PSI]>M_PI) params[PSI]-=M_PI;
+    if(params[PSI]<0.0)  params[PSI]+=M_PI;
     
     
     //rejection sample everything else
@@ -823,8 +787,8 @@ double fm_shift(struct Data *data, struct Model *model, struct Source *source, s
     //perturb frequency by 1 fm
     double scale = floor(6*gsl_ran_gaussian(seed,1));
     
-    params[0] += scale*fm;
-    //params[7] += scale*fm*fm;
+    params[F0] += scale*fm;
+    //params[DFDT] += scale*fm*fm;
     
     //fm shift is symmetric
     return 0.0;
@@ -843,8 +807,8 @@ double psi_phi_jump(UNUSED struct Data *data, UNUSED struct Model *model, struct
     //jump from current position
     for(int i=0; i<source->NP; i++) params[i] = source->params[i];
     
-    params[5] += d_psi;
-    params[6] += d_phi;
+    params[PSI] += d_psi;
+    params[PHI0] += d_phi;
     
     //psi-phi jump is symmetric
     return 0.0;
@@ -1444,7 +1408,7 @@ void setup_prior_proposal(struct Flags *flags, struct Prior *prior, struct Propo
     }
 
     if (priorMode == volumePrior) {
-        proposal->matrix       = malloc(4*sizeof(double*));
+        proposal->matrix       = malloc(3*sizeof(double*));
 
         proposal->matrix[0]    = calloc(3,sizeof(double));
         proposal->matrix[0][0] = prior->dx;
@@ -1458,25 +1422,7 @@ void setup_prior_proposal(struct Flags *flags, struct Prior *prior, struct Propo
         proposal->matrix[1][2] = prior->nz;
 
         proposal->matrix[2]    = prior->volhist;
-
-        // Needed for Mchirp prior
-        proposal->matrix[3]    = calloc(3, sizeof(double));
-        proposal->matrix[3][0] = prior->Mcmax;
-        proposal->matrix[3][1] = prior->Mcmin;
-        proposal->matrix[3][2] = prior->McLogVolume;
-
     }
-}
-
-static inline enum SkyPriorMode sky_prior_mode_from_proposal(struct Proposal * proposal){
-    // Early return and report a uniform prior if we are somehow called on a proposal that
-    // was not packed with a prior. paranoid, but preserves behavior of caller when called 
-    // with a novel proposal.
-    //
-    // proposal-> size is used for different purposes. 
-    // This guards against unpacking a proposal that was not packed with a prior.
-    if(!proposal->is_prior) return uniformPrior;
-    return (enum SkyPriorMode) proposal->size;
 }
 
 /*
@@ -1493,7 +1439,7 @@ static inline enum SkyPriorMode sky_prior_mode_from_proposal(struct Proposal * p
  */
 enum SkyPriorMode unpack_prior_proposal(struct Proposal *proposal, struct Prior * prior) {
 
-    enum SkyPriorMode priorMode = sky_prior_mode_from_proposal(proposal);
+    enum SkyPriorMode priorMode = (!proposal->is_prior) ? uniformPrior : ((enum SkyPriorMode) proposal->size);
 
     if(priorMode == galaxyPrior)
     {
@@ -1514,10 +1460,6 @@ enum SkyPriorMode unpack_prior_proposal(struct Proposal *proposal, struct Prior 
         prior->nz = (int) proposal->matrix[1][2];
 
         prior->volhist = proposal->matrix[2];
-
-        prior->Mcmax = proposal->matrix[3][0];
-        prior->Mcmin = proposal->matrix[3][1];
-        prior->McLogVolume = proposal->matrix[3][2];
     }
 
     return priorMode;
@@ -1827,21 +1769,10 @@ double draw_from_fstatistic(struct Data *data, UNUSED struct Model *model, UNUSE
                 
     }while(p<alpha);
     
-    params[0] = q;
-    params[1] = costheta;
-    params[2] = phi;
+    params[F0] = q;
+    params[COSTHETA] = costheta;
+    params[PHI] = phi;
 
-    //xcxc TODO volume prior
-    // We changed sky location. Fixup source->XYZ keeping distance constant.
-    if (source->D != 0.0) {
-        double x[3];
-        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
-        source->X = x[0];
-        source->Y = x[1];
-        source->Z = x[2];
-    }
-
-    
     logP = evaluate_fstatistic_proposal(data, model, source, proposal, params);
     
     return logP;
@@ -1871,7 +1802,7 @@ double jump_from_fstatistic(struct Data *data, struct Model *model, struct Sourc
     {
         fm_shift(data, model, source, proposal, params, seed);
         
-        q = params[0];
+        q = params[F0];
         i = floor((q-data->qmin)/d_f);
         
         if(i<0.0 || i>n_f-1) return -INFINITY;
@@ -1904,19 +1835,9 @@ double jump_from_fstatistic(struct Data *data, struct Model *model, struct Sourc
                 
     }while(p<alpha);
     
-    params[0] = q;
-    params[1] = costheta;
-    params[2] = phi;
-
-    //xcxc TODO volume prior
-    // We changed sky location. Fixup source->XYZ keeping distance constant.
-    if (source->D != 0.0) {
-        double x[3];
-        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
-        source->X = x[0];
-        source->Y = x[1];
-        source->Z = x[2];
-    }
+    params[F0] = q;
+    params[COSTHETA] = costheta;
+    params[PHI] = phi;
     
     logP = evaluate_fstatistic_proposal(data, model, source, proposal, params);
     
@@ -1949,9 +1870,9 @@ double evaluate_fstatistic_proposal(struct Data *data, UNUSED struct Model *mode
     int n_theta = (int)proposal->matrix[1][0];
     int n_phi   = (int)proposal->matrix[2][0];
     
-    int i = (int)floor((params[0] - data->qmin)/d_f);
-    int j = (int)floor((params[1] - -1)/d_theta);
-    int k = (int)floor((params[2])/d_phi);
+    int i = (int)floor((params[F0] - data->qmin)/d_f);
+    int j = (int)floor((params[COSTHETA] - -1)/d_theta);
+    int k = (int)floor((params[PHI])/d_phi);
     
     if      (i<0 || i>=n_f    ) return -INFINITY;
     else if (j<0 || j>=n_theta) return -INFINITY;

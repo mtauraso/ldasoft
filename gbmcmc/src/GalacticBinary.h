@@ -363,9 +363,6 @@ struct Source
     double m2;  //!< Secondary component mass \f$m_2 \leq m_1\f$
     double Mc;  //!< Chirp mass \f$\mathcal{M}\f$, see galactic_binary_Mc()
     double D;   //!< Luminosity Distance \f$D_L\f$, see galactic_binary_dL()
-    double X;   //!< Galactocentric X coordinate in kpc, see draw_from_volume_prior_uniform()
-    double Y;   //!< Galactocentric Y coordinate in kpc, see draw_from_volume_prior_uniform()
-    double Z;   //!< Galactocentric Z coordinate in kpc, see draw_from_volume_prior_uniform()
     ///@}
     
     ///@name Template waveform alignment
