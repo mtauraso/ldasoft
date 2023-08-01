@@ -22,6 +22,8 @@
 #include <gsl/gsl_randist.h>
 #include <util.h>
 
+#include "gb_params.h"
+
 /**
 @file GalacticBinary.h
 \brief Definition of data structures.
@@ -159,6 +161,7 @@ struct Flags
     int fixFdot;
     int fixFreq;    //!<`[--fix-freq; default=FALSE]`: hold GW frequency fixed to injection parameters
     int galaxyPrior;//!<`[--galaxy-prior; default=FALSE]`: use model of galaxy for sky location prior. Incompatible with --volume-prior.
+    int fDoubleDot; //!<`[--f-double-dot; default=FALSE]`: model f double dot as an MCMC parameter.
     int volumePrior;//!<`[--volume-prior; default=FALSE]`: use 3d volumetric model of galaxy for sky location and distance prior. Incompatible with --galaxy-prior.
     int snrPrior;   //!<`[--snr-prior; default=FALSE]`: use SNR prior for amplitude
     int emPrior;    //!<`[--em-prior=FILENAME]`: use input data file with EM-derived parameters for priors.

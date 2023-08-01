@@ -29,6 +29,7 @@
         "cmath": "c",
         "type_traits": "c",
         "utility": "c",
-        "galacticbinaryio.h": "c"
+        "galacticbinaryio.h": "c",
+        "limits.h": "c"
     }
 }

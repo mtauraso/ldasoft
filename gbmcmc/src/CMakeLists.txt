@@ -2,10 +2,11 @@
 add_library(gbmcmc STATIC GalacticBinaryFStatistic.c GalacticBinaryPrior.c GalacticBinaryWaveform.c
             GalacticBinaryCatalog.c GalacticBinaryIO.c GalacticBinaryMath.c GalacticBinaryProposal.c 
             GalacticBinaryData.c GalacticBinaryMCMC.c GalacticBinaryModel.c GalacticBinaryResidual.c
+            gb_params.c
             GalacticBinary.h
             GalacticBinaryMCMC.h GalacticBinaryIO.h GalacticBinaryModel.h GalacticBinaryWaveform.h 
             GalacticBinaryMath.h GalacticBinaryData.h GalacticBinaryPrior.h GalacticBinaryProposal.h
-            GalacticBinaryFStatistic.h GalacticBinaryCatalog.h)
+            GalacticBinaryFStatistic.h GalacticBinaryCatalog.h gb_params.h)
 
 include_directories ("${PROJECT_SOURCE_DIR}/tools/src/")              
 include_directories ("${PROJECT_SOURCE_DIR}/lisa/src/")

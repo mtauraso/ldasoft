@@ -350,6 +350,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
     flags->fixFdot     = 0;
     flags->galaxyPrior = 0;
     flags->volumePrior = 0;
+    flags->fDoubleDot  = 0;
     flags->snrPrior    = 1;
     flags->emPrior     = 0;
     flags->cheat       = 0;
@@ -393,7 +394,8 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
     data->T        = 62914560.0; /* two "mldc years" at 15s sampling */
     data->sqT      = sqrt(data->T);
     data->N        = 1024;
-    data->NP       = 8; //default includes fdot
+    // xcxc remove this line
+    //data->NP       = 8; //default includes fdot
     data->Nchannel = 2; //1=X, 2=AE
     data->DMAX     = DMAX_default;//maximum number of sources
     data->qpad     = 0;
@@ -510,7 +512,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
                 if(strcmp("volume-prior",long_options[long_index].name) == 0) flags->volumePrior= 1;
                 if(strcmp("no-snr-prior",long_options[long_index].name) == 0) flags->snrPrior   = 0;
                 if(strcmp("prior",       long_options[long_index].name) == 0) flags->prior      = 1;
-                if(strcmp("f-double-dot",long_options[long_index].name) == 0) data->NP          = 9;
+                if(strcmp("f-double-dot",long_options[long_index].name) == 0) flags->fDoubleDot = 1;
                 if(strcmp("detached",    long_options[long_index].name) == 0) flags->detached   = 1;
                 if(strcmp("cheat",       long_options[long_index].name) == 0) flags->cheat      = 1;
                 if(strcmp("no-burnin",   long_options[long_index].name) == 0) flags->burnin     = 0;
@@ -682,6 +684,9 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
         fprintf(stderr, "Together these imply a gravitational wave amplitude, and therefore an SNR.\n");
         exit(1);
     }
+
+    setup_mcmc_param_layout(flags);
+    data->NP = NUM_PARAMS;
     
     //Chains should be a multiple of threads for best usage of cores
     if(chain->NC % flags->threads !=0){
@@ -736,6 +741,50 @@ void copy_argv(int argc, char **argv, char **new_argv)
         memcpy(new_argv[i], argv[i], length);
     }
     new_argv[argc] = NULL;
+}
+
+void setup_mcmc_param_layout(struct Flags *flags) {
+
+    // 8 parameters always in use F0, COSTHETA, PHI, COSI, PSI, PHI0, DFDT, and (AMP or DIST)
+    int NP = 8 + 
+    // Volume prior swaps AMP -> D, MC adding one parameter
+    flags->volumePrior + 
+    // f double dot adds a parameter
+    flags->fDoubleDot;
+
+    int * labels = calloc(NP, sizeof(int));
+
+    // Set up what memory layout will be for params arrays
+    // in the mcmc sampler based on runtime options.
+    int i = 0;
+
+    labels[i] = F0; i += 1;
+    labels[i] = COSTHETA; i += 1;
+    labels[i] = PHI; i += 1;
+
+    if(flags->volumePrior){ labels[i] = DIST; }
+    else { labels[i] = AMP; }
+    i+=1;
+
+    labels[i] = COSI; i+=1;
+    labels[i] = PSI; i+=1;
+    labels[i] = PHI0; i+=1;
+    
+    if(flags->volumePrior) { 
+        labels[i] = DFDTASTRO; i+=1;
+        labels[i] = MC; i+=1;
+    } else {
+        labels[i] = DFDT; i+=1;
+    }
+    if(flags->fDoubleDot) { labels[i] = D2FDT2; i+=1;}
+
+    setup_parameters(labels, NP);
+    // Possible layouts the rest of the code will have to work with
+    // 1) {F0, COSTHETA, PHI, AMP, COSI, PSI, PHI0, DFDT}                     NUM_PARAMS = 8
+    // 2) {F0, COSTHETA, PHI, AMP, COSI, PSI, PHI0, DFDT, DF2DT2}             NUM_PARAMS = 9
+    // 3) {F0, COSTHETA, PHI, DIST, COSI, PSI, PHI0, DFDTASTRO, MC}           NUM_PARAMS = 9
+    // 4) {F0, COSTHETA, PHI, DIST, COSI, PSI, PHI0, DFDTASTRO, MC, DF2DT2}   NUM_PARAMS = 10
+    free(labels);
 }
 
 void parse_vb_list(int argc, char **argv, struct Flags *flags)

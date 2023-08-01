@@ -57,6 +57,11 @@ void print_usage();
 void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct Flags *flags, struct Chain *chain, int Nmax);
 
 /**
+ \brief Set up parameter layout depending on runtime flags
+*/
+void setup_mcmc_param_layout(struct Flags *flags);
+
+/**
  \brief select only part of command line defining verification binary lists
 */
 void parse_vb_list(int argc, char **argv, struct Flags *flags);

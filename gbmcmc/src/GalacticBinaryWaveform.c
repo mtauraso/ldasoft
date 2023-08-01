@@ -332,19 +332,26 @@ void galactic_binary(struct Orbit *orbit, char *format, double T, double t0, dou
     
     /*   Gravitational Wave source parameters   */
     
-    f0     = params[0]/T;
-    costh  = params[1];
-    phi    = params[2];
-    amp    = exp(params[3]);
-    cosi   = params[4];
-    psi    = params[5];
-    phi0   = params[6];
+    f0     = params[F0]/T;
+    costh  = params[COSTHETA];
+    phi    = params[PHI];
+    if(is_param(AMP)) {
+        amp    = exp(params[AMP]);
+    } else if (is_param(MC) && is_param(DIST)) {
+        amp = galactic_binary_Amp(params[MC], f0, params[DIST]);
+    }
+    cosi   = params[COSI];
+    psi    = params[PSI];
+    phi0   = params[PHI0];
     dfdt   = 0.0;
     d2fdt2 = 0.0;
-    if(NP>7)
-        dfdt   = params[7]/(T*T);
-    if(NP>8)
-        d2fdt2 = params[8]/(T*T*T);
+    if(is_param(DFDT)) {
+        dfdt   = params[DFDT]/(T*T);
+    } else if (is_param(DFDTASTRO) && is_param(MC)) {
+        dfdt = params[DFDTASTRO]/(T*T) + galactic_binary_fdot(params[MC], f0);
+    }
+    if(is_param(D2FDT2))
+        d2fdt2 = params[D2FDT2]/(T*T*T);
     
     //Calculate carrier frequency bin
     q = (long)(f0*T);
