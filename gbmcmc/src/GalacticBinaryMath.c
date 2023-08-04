@@ -180,7 +180,7 @@ double waveform_snr(struct Source *h, struct Noise *noise, struct Orbit *orbit)
     double *SnA = calloc(h->BW,sizeof(double));
     double *SnE = calloc(h->BW,sizeof(double));
 
-    double T = h->params[0]/h->f0;
+    double T = h->params[F0]/h->f0;
 
     double h_fmin = h->f0 - (double)h->BW/2./T;
 

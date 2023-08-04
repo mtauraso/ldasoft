@@ -363,6 +363,7 @@ struct Source
     double m2;  //!< Secondary component mass \f$m_2 \leq m_1\f$
     double Mc;  //!< Chirp mass \f$\mathcal{M}\f$, see galactic_binary_Mc()
     double D;   //!< Luminosity Distance \f$D_L\f$, see galactic_binary_dL()
+    double dfdtastro; //!< portion of the first time derivative of GW frequency attributable to non-GW astrophysical effects
     ///@}
     
     ///@name Template waveform alignment

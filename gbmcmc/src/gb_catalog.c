@@ -99,6 +99,7 @@ void parse_catalog(int argc, char **argv, struct Data *data, struct Orbit *orbit
     flags->DMAX        = DMAX_default;
     flags->catalog     = 0;
     flags->verbose     = 0;
+    flags->fDoubleDot  = 0;
     flags->simNoise = 1; //hijack simNoise flag for noise model
     data->pmax      = 0.5; //default match tolerance for inclusion (hijacked pmax in data structure)
     *Tcatalog          = -1.0;
@@ -120,7 +121,8 @@ void parse_catalog(int argc, char **argv, struct Data *data, struct Orbit *orbit
     
     data->T        = 62914560.0; /* two "mldc years" at 15s sampling */
     data->N        = 1024;
-    data->NP       = 8; //default includes fdot
+    // xcxc remove this line
+    //data->NP       = 8; //default includes fdot
     data->Nchannel = 2; //1=X, 2=AE
     data->DMAX     = DMAX_default;//maximum number of sources
     
@@ -158,6 +160,7 @@ void parse_catalog(int argc, char **argv, struct Data *data, struct Orbit *orbit
         {"frac-freq",   no_argument, 0, 0 },
         {"sangria",     no_argument, 0, 0 },
         {"f-double-dot",no_argument, 0, 0 },
+        {"volume-prior",no_argument, 0, 0 },
         {0, 0, 0, 0}
     };
     
@@ -179,7 +182,9 @@ void parse_catalog(int argc, char **argv, struct Data *data, struct Orbit *orbit
                 if(strcmp("Tcatalog",    long_options[long_index].name) == 0) *Tcatalog  = (double)atof(optarg);
                 if(strcmp("Nmode",       long_options[long_index].name) == 0) *NMODE     = (size_t)atoi(optarg);
                 if(strcmp("thin",        long_options[long_index].name) == 0) *NTHIN     = (size_t)atoi(optarg);
-                if(strcmp("f-double-dot",long_options[long_index].name) == 0) data->NP   = 9;
+                if(strcmp("f-double-dot",long_options[long_index].name) == 0) flags->fDoubleDot = true;
+                if(strcmp("volume-prior",long_options[long_index].name) == 0) flags->volumePrior = true;
+
                 if(strcmp("sources",     long_options[long_index].name) == 0)
                 {
                     data->DMAX    = atoi(optarg);
@@ -258,6 +263,9 @@ void parse_catalog(int argc, char **argv, struct Data *data, struct Orbit *orbit
         exit(1);
     }
     
+    setup_mcmc_param_layout(flags);
+    data->NP = NUM_PARAMS;
+
     //pad data
     data->N += 2*data->qpad;
     data->fmin -= data->qpad/data->T;
@@ -290,20 +298,27 @@ void parse_catalog(int argc, char **argv, struct Data *data, struct Orbit *orbit
     fclose(runlog);
 }
 
-
+//xcxc moved to GalacticBinaryIO.c
+#if 0
 static int safe_scan_source_params(struct Data *data, struct Source *source, FILE *fptr)
 {
 
     int check = 0;
     check+=fscanf(fptr,"%lg",&source->f0);
-    check+=fscanf(fptr,"%lg",&source->dfdt);
-    check+=fscanf(fptr,"%lg",&source->amp);
+    if(is_param(DFDT) || is_param(DFDTASTRO))
+        check+=fscanf(fptr,"%lg",&source->dfdt);
+    if(is_param(AMP))
+        check+=fscanf(fptr,"%lg",&source->amp);
     check+=fscanf(fptr,"%lg",&source->phi);
     check+=fscanf(fptr,"%lg",&source->costheta);
     check+=fscanf(fptr,"%lg",&source->cosi);
     check+=fscanf(fptr,"%lg",&source->psi);
     check+=fscanf(fptr,"%lg",&source->phi0);
-    if(source->NP>8)
+    if(is_param(MC))
+        check+=fscanf(fptr,"%lg",&source->Mc);
+    if(is_param(DIST))
+        check+=fscanf(fptr,"%lg",&source->D);
+    if(is_param(D2FDT2))
         check+=fscanf(fptr,"%lg",&source->d2fdt2);
     
     if(!check)
@@ -316,6 +331,7 @@ static int safe_scan_source_params(struct Data *data, struct Source *source, FIL
     return 0;
 
 }
+#endif
 
 static void source_waveform_wrapper(struct Source *source, struct Data *data, struct Orbit *orbit)
 {
@@ -385,17 +401,22 @@ int main(int argc, char *argv[])
     
     /* Reformat for catalog */
     //frequency & derivatives
-    model->prior[0][0] /= data->T;
-    model->prior[0][1] /= data->T;
-    if(data->NP>7)
+    model->prior[F0][0] /= data->T;
+    model->prior[F0][1] /= data->T;
+    if(is_param(DFDT))
     {
-        model->prior[7][0] /= data->T*data->T;
-        model->prior[7][1] /= data->T*data->T;
+        model->prior[DFDT][0] /= data->T*data->T;
+        model->prior[DFDT][1] /= data->T*data->T;
     }
-    if(data->NP>8)
+    if(is_param(DFDTASTRO))
     {
-        model->prior[8][0] /= data->T*data->T*data->T;
-        model->prior[8][1] /= data->T*data->T*data->T;
+        model->prior[DFDTASTRO][0] /= data->T*data->T;
+        model->prior[DFDTASTRO][1] /= data->T*data->T;
+    }
+    if(is_param(D2FDT2))
+    {
+        model->prior[D2FDT2][0] /= data->T*data->T*data->T;
+        model->prior[D2FDT2][1] /= data->T*data->T*data->T;
     }
     
     //alias for catalog->entry pointers used later on
@@ -812,15 +833,12 @@ int main(int argc, char *argv[])
                 //check that the sources are close enough to bother looking
                 if(fabs(q_new_catalog_entry - q_old_catalog_entry) > dqmax) continue;
                 
-                //copy_source(entry->source[entry->i], new_catalog_entry);
                 
                 /* parameter-only copy */
-                new_catalog_entry->NP = entry->source[entry->i]->NP;
-                memcpy(new_catalog_entry->params, entry->source[entry->i]->params, new_catalog_entry->NP*sizeof(double));
-                
-                //override q parameter
-                new_catalog_entry->params[0] = entry->source[entry->i]->f0 * data_old->T;
-                new_catalog_entry->params[7] = entry->source[entry->i]->dfdt * data_old->T* data_old->T;
+                copy_source_params_only(entry->source[entry->i], new_catalog_entry, data->T);
+
+                // Convert frequency units to old measurement band in the params array
+                map_params_to_array(new_catalog_entry, new_catalog_entry->params, data_old->T);
 
                 //re-align where the source fits in the (old) measurement band
                 galactic_binary_alignment(orbit, data_old, new_catalog_entry);

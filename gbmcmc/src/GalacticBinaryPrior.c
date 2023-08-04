@@ -814,23 +814,14 @@ double evaluate_gmm_prior(struct Data *data, struct GMM *gmm, double *params)
     struct MVG **modes = gmm->modes;
     size_t NMODES = gmm->NMODE;
     
-
     //pack parameters into gsl_vector with correct units
     struct Source *source = malloc(sizeof(struct Source));
+    double * params_hz = calloc(NP, sizeof(double));
     alloc_source(source, data->N, data->Nchannel, data->NP);
-    
     map_array_to_params(source, params, data->T);
-    gsl_vector_set(x,0,source->f0);
-    gsl_vector_set(x,1,source->costheta);
-    gsl_vector_set(x,2,source->phi);
-    gsl_vector_set(x,3,log(source->amp));
-    gsl_vector_set(x,4,source->cosi);
-    gsl_vector_set(x,5,source->psi);
-    gsl_vector_set(x,6,source->phi0);
-    if(NP>7)
-        gsl_vector_set(x,7,source->dfdt);
-    if(NP>8)
-        gsl_vector_set(x,8,source->d2fdt2);
+    map_params_to_array(source, params_hz, 1.0); 
+    for(size_t i=0; i<NP; i++)
+        gsl_vector_set(x,i,params_hz[i]);
 
     //map parameters to R
     double xmin,xmax,xn,yn, logJ = 0;

@@ -226,13 +226,14 @@ void galactic_binary_mcmc(struct Orbit *orbit, struct Data *data, struct Model *
     //hold sky position fixed to injected value
     if(flags->fixSky)
     {
-        source_y->params[1] = data->inj->costheta;
-        source_y->params[2] = data->inj->phi;
+        source_y->params[COSTHETA] = data->inj->costheta;
+        source_y->params[PHI] = data->inj->phi;
     }
     
     //hold frequencies fixed to injected value
-    if(flags->fixFreq) source_y->params[0] = data->inj->f0*data->T;
-    if(flags->fixFdot) source_y->params[7] = data->inj->dfdt*data->T*data->T;
+    if(flags->fixFreq) source_y->params[F0] = data->inj->f0*data->T;
+    if(flags->fixFdot && is_param(DFDT)) source_y->params[DFDT] = data->inj->dfdt*data->T*data->T;
+    if(flags->fixFdot && is_param(DFDTASTRO)) source_y->params[DFDTASTRO] = data->inj->dfdtastro*data->T*data->T;
     
     //call associated proposal density functions
     logQyx = (*proposal[nprop]->density)(data, model_x, source_y, proposal[nprop], source_y->params);
@@ -645,26 +646,10 @@ void initialize_gbmcmc_state(struct Data *data, struct Orbit *orbit, struct Flag
         for(int n=0; n<DMAX; n++)
         {
             if(flags->cheat)
-            {
-                struct Source *inj = data->inj;
-                //map parameters to vector
-                model[ic]->source[n]->NP       = inj->NP;
-                model[ic]->source[n]->f0       = inj->f0;
-                model[ic]->source[n]->dfdt     = inj->dfdt;
-                model[ic]->source[n]->costheta = inj->costheta;
-                model[ic]->source[n]->phi      = inj->phi;
-                model[ic]->source[n]->amp      = inj->amp;
-                model[ic]->source[n]->cosi     = inj->cosi;
-                model[ic]->source[n]->phi0     = inj->phi0;
-                model[ic]->source[n]->psi      = inj->psi;
-                model[ic]->source[n]->d2fdt2   = inj->d2fdt2;
-                map_params_to_array(model[ic]->source[n], model[ic]->source[n]->params, data->T);
-                
-            }
+                copy_source_params_only(data->inj, model[ic]->source[n], data->T);            
             else
-            {
                 draw_from_uniform_prior(data, model[ic], model[ic]->source[n], proposal[0], model[ic]->source[n]->params , chain->r[ic]);
-            }
+
             map_array_to_params(model[ic]->source[n], model[ic]->source[n]->params, data->T);
             galactic_binary_fisher(orbit, data, model[ic]->source[n], data->noise[0]);
             model[ic]->source[n]->fisher_update_flag=0;

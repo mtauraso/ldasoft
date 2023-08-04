@@ -162,7 +162,7 @@ int main(int argc, char *argv[])
 
             scan_source_params(data, src1, chain_file1);
             
-            if( fabs(src1->params[0] - src2->params[0]) < 20.)
+            if( fabs(src1->params[F0] - src2->params[F0]) < 20.)
             {
                 for(int n=0; n<2*data->N; n++)
                 {

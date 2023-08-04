@@ -139,6 +139,12 @@ void alloc_calibration(struct Calibration *calibration);
  */
 void copy_data(struct Data *origin, struct Data *copy);
 
+/**
+ \brief Very Shallow copy of Source. 
+        Only touches params array, NP, and named parameter members which can be calculated from params.
+ */
+void copy_source_params_only(struct Source *origin, struct Source *copy, double T);
+
 /** @name Deep copy structure contents */
 ///@{
 void copy_source(struct Source *origin, struct Source *copy);

@@ -42,6 +42,23 @@ void map_array_to_params(struct Source *source, double *params, double T)
     source->f0       = params[F0]/T;
     source->costheta = params[COSTHETA];
     source->phi      = params[PHI];
+
+    // All legacy params are needed for file I/O because sources and catalog files must 
+    // reflect the parameters of the gravitational wave, regardless of what 
+    // parameterization is in use in memory.
+    //
+    // The legacy params are F0, COSTHETA, PHI, AMP, COSI, PSI, PHI0, and DFDT
+    // Therefore we must always compute them. This assert is paranoia to that effect
+    // which matches if statements below.
+    //
+    // We do these as asserts to prevent unnecessary branches in release code, because
+    // this function is called a lot.
+    //
+    // Assure we calculate amplitude
+    assert(is_param(AMP) || (is_param(DIST) && is_param(MC)));
+    // Assure we calculate dfdt
+    assert(is_param(DFDT) || (is_param(DFDTASTRO) && is_param(MC)));
+
     if(is_param(AMP))
         source->amp      = exp(params[AMP]);
         // Note that when in amplitude only mode there is no
@@ -52,13 +69,16 @@ void map_array_to_params(struct Source *source, double *params, double T)
         source->Mc  = params[MC];
         source->D   = params[DIST];
     }
+
     source->cosi     = params[COSI];
     source->psi      = params[PSI];
     source->phi0     = params[PHI0];
     if(is_param(DFDT))
         source->dfdt   = params[DFDT]/(T*T);
-    if(is_param(DFDTASTRO) && is_param(MC)) 
-        source->dfdt   = params[DFDTASTRO]/(T*T) + galactic_binary_fdot(params[MC], source->f0);
+    if(is_param(DFDTASTRO) && is_param(MC)) { 
+        source->dfdtastro = params[DFDTASTRO]/(T*T);
+        source->dfdt   =  source->dfdtastro + galactic_binary_fdot(params[MC], source->f0);
+    }
     if(is_param(D2FDT2))
         source->d2fdt2 = params[D2FDT2]/(T*T*T);
 }
@@ -795,6 +815,13 @@ void alloc_source(struct Source *source, int NFFT, int Nchannel, int NP)
             source->fisher_evectr[i][j] = calloc(dim,sizeof(double));
         }
     }
+}
+
+void copy_source_params_only(struct Source *origin, struct Source *copy, double T) 
+{
+    copy->NP = origin->NP;
+    memcpy(copy->params, origin->params, origin->NP*sizeof(double));
+    map_array_to_params(copy, copy->params, T);
 }
 
 void copy_source(struct Source *origin, struct Source *copy)

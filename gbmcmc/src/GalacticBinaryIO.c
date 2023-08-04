@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <omp.h>
 
 #include <sys/stat.h>
@@ -116,8 +117,10 @@ void print_gb_catalog_script(struct Flags *flags, struct Data *data, struct Orbi
         fprintf(fptr,"--sangria ");
     if(flags->orbit)
         fprintf(fptr,"--orbit %s ",orbit->OrbitFileName);
-    if(data->NP==9)
+    if(flags->fDoubleDot)
         fprintf(fptr,"--f-double-dot ");
+    if(flags->volumePrior)
+        fprintf(fptr, "--volume-prior");
     if(data->Nchannel==1)
         fprintf(fptr,"--links 4 ");
     
@@ -976,7 +979,7 @@ void print_chain_files(struct Data *data, struct Model **model, struct Chain *ch
             //numerical SNR
             double snr_n = snr(model[n]->source[i], data->noise[0]);
             //analytic SNR
-            double snr_a = analytic_snr(exp(model[n]->source[i]->params[3]), data->noise[0]->SnA[0], data->sine_f_on_fstar, data->sqT);
+            double snr_a = analytic_snr(model[n]->source[i]->amp, data->noise[0]->SnA[0], data->sine_f_on_fstar, data->sqT);
             
             fprintf(chain->parameterFile[0],"%lg %lg ",snr_a,snr_n);
         }
@@ -1155,40 +1158,68 @@ void print_source_params(struct Data *data, struct Source *source, FILE *fptr)
     map_array_to_params(source, source->params, data->T);
     
     fprintf(fptr,"%.16g ",source->f0);
+    
+    // dfdt should always be output regardless of our internal representation.  See map_array_to_params()
+    assert(is_param(DFDT) || is_param(DFDTASTRO));
     fprintf(fptr,"%.12g ",source->dfdt);
+    
+    // Amplitude is always output even if it is not a parameter. See map_array_to_params()
     fprintf(fptr,"%.12g ",source->amp);
     fprintf(fptr,"%.12g ",source->phi);
     fprintf(fptr,"%.12g ",source->costheta);
     fprintf(fptr,"%.12g ",source->cosi);
     fprintf(fptr,"%.12g ",source->psi);
     fprintf(fptr,"%.12g ",source->phi0);
-    if(source->NP>8)
+    if(is_param(MC))
+        fprintf(fptr,"%.12g ",source->Mc);
+    if(is_param(DIST))
+        fprintf(fptr,"%.12g ",source->D);
+    if(is_param(D2FDT2))
         fprintf(fptr,"%.12g ",source->d2fdt2);
 }
 
-void scan_source_params(struct Data *data, struct Source *source, FILE *fptr)
+int safe_scan_source_params(struct Data *data, struct Source *source, FILE *fptr)
 {
     int check = 0;
     check+=fscanf(fptr,"%lg",&source->f0);
+
+    // dfdt should always be output regardless of our internal representation.  See map_array_to_params()
+    assert(is_param(DFDT) || is_param(DFDTASTRO));
     check+=fscanf(fptr,"%lg",&source->dfdt);
+
+    // Amplitude is always output even if it is not a parameter. See map_array_to_params()
     check+=fscanf(fptr,"%lg",&source->amp);
+
     check+=fscanf(fptr,"%lg",&source->phi);
     check+=fscanf(fptr,"%lg",&source->costheta);
     check+=fscanf(fptr,"%lg",&source->cosi);
     check+=fscanf(fptr,"%lg",&source->psi);
     check+=fscanf(fptr,"%lg",&source->phi0);
-    if(source->NP>8)
+    if(is_param(MC))
+        check+=fscanf(fptr,"%lg",&source->Mc);
+    if(is_param(DIST))
+        check+=fscanf(fptr,"%lg",&source->D);
+    if(is_param(D2FDT2))
         check+=fscanf(fptr,"%lg",&source->d2fdt2);
     
-    if(!check)
+    // We have a problem if we did not read every parameter in use 
+    // (plus amplitude if amplitude is not in use)
+    if(check != NUM_PARAMS + ((int) !is_param(AMP)) )
+        return 1;
+    
+    //map to parameter names (just to make code readable)
+    map_params_to_array(source, source->params, data->T);
+    return 0;
+}
+
+void scan_source_params(struct Data *data, struct Source *source, FILE *fptr)
+{
+    // safe_scan_source_params returns zero on success    
+    if(safe_scan_source_params(data, source, fptr))
     {
         fprintf(stdout,"Error reading source file\n");
         exit(1);
     }
-    
-    //map to parameter names (just to make code readable)
-    map_params_to_array(source, source->params, data->T);
-    
 }
 
 void save_waveforms(struct Data *data, struct Model *model, int mcmc)

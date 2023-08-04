@@ -639,7 +639,11 @@ void GalacticBinaryInjectVerificationSource(struct Data *data, struct Orbit *orb
             inj->cosi     = cosi;
             inj->phi0     = phi0;
             inj->psi      = psi;
+            inj->D        = D;
+            inj->Mc       = Mc;
             map_params_to_array(inj, inj->params, data->T);
+            // ensure all physical parameters (even derived ones) are populated.
+            map_array_to_params(inj, inj->params, data->T); 
             
             //save parameters to file
             pathprintf(filename,"%s/injection_parameters_%i_%i.dat",flags->runDir,ii,jj);
@@ -758,6 +762,13 @@ void GalacticBinaryInjectVerificationSource(struct Data *data, struct Orbit *orb
 }
 void GalacticBinaryInjectSimulatedSource(struct Data *data, struct Orbit *orbit, struct Flags *flags)
 {
+    // TODO: make injection of a simulated source work with volume prior.
+    // Core issue here is that an injection file doesn't have Mc or D, so we need to make one up.
+    if(flags->volumePrior) {
+        fprintf(stderr, "Cannot inject a source in --volume-pior mode. Functionality unimplemented\n");
+        exit(1);
+    }
+
     FILE *fptr;
     
     /* Get injection parameters */
@@ -852,8 +863,8 @@ void GalacticBinaryInjectSimulatedSource(struct Data *data, struct Orbit *orbit,
                 inj->cosi     = cos(iota);
                 inj->phi0     = phi0;
                 inj->psi      = psi;
-                if(data->NP>8)
-                    inj->d2fdt2 = 11.0/3.0*dfdt*dfdt/f0;
+
+                inj->d2fdt2   = 11.0/3.0*dfdt*dfdt/f0;
                 //inj->d2fdt2 = fddot;
                 
                 map_params_to_array(inj, inj->params, data->T);
@@ -863,6 +874,9 @@ void GalacticBinaryInjectSimulatedSource(struct Data *data, struct Orbit *orbit,
                 if(nn==0)paramFile=fopen(filename,"w");
                 else     paramFile=fopen(filename,"a");
                 fprintf(paramFile,"%lg ",data->t0[jj]);
+                // TODO:
+                // Note that when --f-double-dot is in use the injection file output here has fdoubledot entries
+                // However the input code above does not support that.
                 print_source_params(data, inj, paramFile);
                 fprintf(paramFile,"\n");
                 fclose(paramFile);
@@ -1055,12 +1069,25 @@ void GetVerificationBinary(struct Data *data, struct Flags *flags, FILE *vbFile)
     inj->cosi     = cosi;
     inj->phi0     = phi0;
     inj->psi      = psi;
+    inj->Mc       = Mc;
+    inj->D        = D;
     map_params_to_array(inj, inj->params, data->T);
+    //ensure all parameters (even derived ones) have been populated
+    map_array_to_params(inj, inj->params, data->T);
 }
 
 
 void GalacticBinaryCatalogSNR(struct Data *data, struct Orbit *orbit, struct Flags *flags)
 {
+    // TODO: make injection of a simulated source work with volume prior.
+    // Core issue here is that an injection file doesn't have Mc or D, so we need to make one up.
+    // This function is currently unused, so it is somewhat academic
+    if(flags->volumePrior) {
+        fprintf(stderr, "Cannot call GalacticBinaryCatalogSNR in --volume-pior mode. Functionality unimplemented\n");
+        exit(1);
+    }
+
+
     fprintf(stdout,"\n==== GalacticBinaryInjectSimulatedSource ====\n");
     
     /* Get injection parameters */
@@ -1290,9 +1317,9 @@ void GalacticBinaryCleanEdges(struct Data *data, struct Orbit *orbit, struct Fla
         
         //find where the source fits in the measurement band
         galactic_binary_alignment(orbit, data, catalog_entry);
-        double q0   = catalog_entry->params[0];
-        double qmax = catalog_entry->params[0] + catalog_entry->BW/2;
-        double qmin = catalog_entry->params[0] - catalog_entry->BW/2;
+        double q0   = catalog_entry->params[F0];
+        double qmax = catalog_entry->params[F0] + catalog_entry->BW/2;
+        double qmin = catalog_entry->params[F0] - catalog_entry->BW/2;
         
         
         /*

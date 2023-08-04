@@ -114,6 +114,7 @@ void scan_calibration_state(struct Data *data, struct Model *model, FILE *fptr, 
 ///@{
 void print_source_params(struct Data *data, struct Source *source, FILE *fptr);
 void scan_source_params(struct Data *data, struct Source *source, FILE *fptr);
+int safe_scan_source_params(struct Data *data, struct Source *source, FILE *fptr);
 ///@}
 
 /**

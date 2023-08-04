@@ -121,7 +121,7 @@ void append_sample_to_entry(struct Entry *entry, struct Source *sample, int IMAX
     memcpy(entry->source[entry->I]->params, sample->params, sample->NP*sizeof(double));
     
     //need Tobs which isn't stored in entries
-    double T = sample->params[0]/sample->f0;
+    double T = sample->params[F0]/sample->f0;
     
     //get physical parameters for waveform calculations later
     map_array_to_params(entry->source[entry->I], entry->source[entry->I]->params, T);
@@ -276,17 +276,12 @@ int gaussian_mixture_model_wrapper(double **ranges, struct Flags *flags, struct 
     double value[NP];
     for(size_t i=0; i<NMCMC; i++)
     {
-        value[0] = entry->source[i*NTHIN]->f0;
-        value[1] = entry->source[i*NTHIN]->costheta;
-        value[2] = entry->source[i*NTHIN]->phi;
-        value[3] = log(entry->source[i*NTHIN]->amp);
-        value[4] = entry->source[i*NTHIN]->cosi;
-        value[5] = entry->source[i*NTHIN]->psi;
-        value[6] = entry->source[i*NTHIN]->phi0;
-        if(NP>7)
-            value[7] = entry->source[i*NTHIN]->dfdt;
-        if(NP>8)
-            value[8] = entry->source[i*NTHIN]->d2fdt2;
+        // T= 1.0 here because gb_catalog (only caller) operates with Hz as the
+        // frequency units for double * params and struct Source members.
+        // This ensures the unit conversion for frequencies in map_params_to_array 
+        // is a noop, and keeps things DRY wrt converting between struct Source and 
+        // double * representations of gb parameters.
+        map_params_to_array(entry->source[i*NTHIN], value, 1.0);
         
         for(size_t n=0; n<NP; n++)
         {
