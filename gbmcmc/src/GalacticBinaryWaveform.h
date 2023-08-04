@@ -172,5 +172,7 @@ int galactic_binary_bandwidth(double L, double fstar, double f, double fdot, dou
  @param[out] A,E noise orthogonal TDI channels
  */
 void galactic_binary(struct Orbit *orbit, char *format, double T, double t0, double params[], int NP, double *X, double *A, double *E, int BW, int NI);
+void galactic_binary_from_source(struct Orbit *orbit, char *format, double T, double t0, struct Source *source, int NP, double *X, double *A, double *E, int BW, int NI);
+
 
 #endif /* GalacticBinaryWaveform_h */

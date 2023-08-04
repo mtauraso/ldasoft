@@ -70,6 +70,8 @@ double galactic_binary_dL(double f0, double dfdt, double A)
     return ((5./48.)*(fd/(M_PI*M_PI*f*f*f*amp))*CLIGHT/PC); //seconds  !check notes on 02/28!
 }
 
+
+// Skip iteration logic for fisher basis cases where a parameter must be skipped.
 int start_param_in_basis(UNUSED int basisindex) {
     // Right now first param (F0) in use in every basis.
     return 0;
@@ -293,6 +295,13 @@ void galactic_binary_alignment(struct Orbit *orbit, struct Data *data, struct So
 
 void galactic_binary(struct Orbit *orbit, char *format, double T, double t0, double *params, int NP, double *X, double *A, double *E, int BW, int NI)
 {
+    struct Source temp;
+    map_array_to_params(&temp, params, T);
+    galactic_binary_from_source(orbit, format, T, t0, &temp, NP, X, A, E, BW, NI);
+}
+
+void galactic_binary_from_source(struct Orbit *orbit, char *format, double T, double t0, struct Source *source, int NP, double *X, double *A, double *E, int BW, int NI)
+{
     /*   Indicies   */
     int i,j,n;
     /*   Carrier frequency bin  */
@@ -364,27 +373,15 @@ void galactic_binary(struct Orbit *orbit, char *format, double T, double t0, dou
     }
     
     /*   Gravitational Wave source parameters   */
-    
-    f0     = params[F0]/T;
-    costh  = params[COSTHETA];
-    phi    = params[PHI];
-    if(is_param(AMP)) {
-        amp    = exp(params[AMP]);
-    } else if (is_param(MC) && is_param(DIST)) {
-        amp = galactic_binary_Amp(params[MC], f0, params[DIST]);
-    }
-    cosi   = params[COSI];
-    psi    = params[PSI];
-    phi0   = params[PHI0];
-    dfdt   = 0.0;
-    d2fdt2 = 0.0;
-    if(is_param(DFDT)) {
-        dfdt   = params[DFDT]/(T*T);
-    } else if (is_param(DFDTASTRO) && is_param(MC)) {
-        dfdt = params[DFDTASTRO]/(T*T) + galactic_binary_fdot(params[MC], f0);
-    }
-    if(is_param(D2FDT2))
-        d2fdt2 = params[D2FDT2]/(T*T*T);
+    f0     = source->f0;
+    costh  = source->costheta;
+    phi    = source->phi;
+    amp    = source->amp;
+    cosi   = source->cosi;
+    psi    = source->psi;
+    phi0   = source->phi0;
+    dfdt   = source->dfdt;
+    d2fdt2 = source->d2fdt2;
     
     //Calculate carrier frequency bin
     q = (long)(f0*T);

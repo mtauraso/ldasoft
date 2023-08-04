@@ -34,6 +34,7 @@
 
 #include "GalacticBinary.h"
 #include "GalacticBinaryMath.h"
+#include "GalacticBinaryModel.h"
 #include "GalacticBinaryWaveform.h"
 #include "GalacticBinaryFStatistic.h"
 
@@ -159,121 +160,57 @@ void free_Filter(struct Filter *F_filter)
 
 void get_filters(struct Orbit *orbit, struct Data *data, int filter_id, struct Filter *F_filter)
 {
-    int i;
-    int d=9;
-    double A_f,iota_f,psi_f,phase_f;
-    double *params;
+    struct Source source;
     long M_filter;
+    double *X, *A, *E;
     
     M_filter = F_filter->M_filter;
     
-    params = calloc(d,sizeof(double));  // allocate memory for filter parameters
-    for (i=0;i<d;i++)  		 // initialize the array to zeros
-    {
-        params[i] = 0.0;
-    }
+    source.f0 = F_filter->f0;				 // f0 
+    source.costheta = cos(F_filter->theta); // theta
+    source.phi = F_filter->phi;    	     // phi
     
-    // set the parameters
-    params[0] = F_filter->f0;				 // f0
-    params[1] = F_filter->theta;    	     // theta
-    params[2] = F_filter->phi; 			     // phi
-    
-    params[7] = F_filter->fdot;				 // fdot
-    params[8] = F_filter->fddot;			 // fddot
-    
-    // map to conventions for waveform generator
-    params[0]*=data->T;
-    params[1]=cos(params[1]);
-    params[7]*=(data->T*data->T);
-    params[8]*=(data->T*data->T*data->T);
+    source.dfdt = F_filter->fdot;				 // fdot
+    source.d2fdt2 = F_filter->fddot;			 // fddot
     
     // Now need to calculate the Filters A^{i} (Cornish & Crowder '05)
     // A^{1} -> iota = pi/2, psi = 0,    A = 2, phase = 0
     // A^{2} -> iota = pi/2, psi = pi/4, A = 2, phase = pi
     // A^{3} -> iota = pi/2, psi = 0,    A = 2, phase = 3*pi/2
     // A^{4} -> iota = pi/2, psi = pi/4, A = 2, phase = pi/2
+
+    // Same values across all filters
+    source.amp = 2.0;
+    source.cosi = cos(PIon2);
     
-    
-    // determine which parameters to pass into FAST_LISA
+    // determine which parameters to pass into galactic_binary
     if (filter_id == 1)
-    {
-        A_f      = 2.0;
-        iota_f   = PIon2;
-        psi_f    = 0.0;
-        phase_f  = 0.0;
-        
-        params[3] = A_f;
-        params[4] = iota_f;
-        params[5] = psi_f;
-        params[6] = phase_f;
-        
-        
-        
-        //FAST_LISA(params, N_filter, M_filter, F_filter->A1_fX, F_filter->A1_fA, F_filter->A1_fE);
-        // map to conventions for waveform generator
-        params[3]=log(params[3]);
-        params[4]=cos(params[4]);
-        galactic_binary(orbit, data->format, data->T, data->t0[0], params, data->NP, F_filter->A1_fX, F_filter->A1_fA, F_filter->A1_fE, M_filter, 2);
-        
+    {    
+        source.psi = 0.0;
+        source.phi0 = 0.0;
+        X = F_filter->A1_fX;
+        A = F_filter->A1_fA;
+        E = F_filter->A1_fE;
     } else if (filter_id == 2){
-        
-        A_f      = 2.0;
-        iota_f   = PIon2;
-        psi_f    = PIon4;
-        phase_f  = M_PI;
-        
-        params[3] = A_f;
-        params[4] = iota_f;
-        params[5] = psi_f;
-        params[6] = phase_f;
-        
-        
-        //FAST_LISA(params, N_filter, M_filter, F_filter->A1_fX, F_filter->A1_fA, F_filter->A1_fE);
-        // map to conventions for waveform generator
-        params[3]=log(params[3]);
-        params[4]=cos(params[4]);
-        galactic_binary(orbit, data->format, data->T, data->t0[0], params, data->NP, F_filter->A2_fX, F_filter->A2_fA, F_filter->A2_fE, M_filter, 2);
-        
+        source.psi = PIon4;
+        source.phi0 = M_PI;
+        X = F_filter->A2_fX;
+        A = F_filter->A2_fA;
+        E = F_filter->A2_fE;
     } else if (filter_id == 3){
-        
-        A_f      = 2.0;
-        iota_f   = PIon2;
-        psi_f    = 0.0;
-        phase_f  = 3.0*PIon2;
-        
-        params[3] = A_f;
-        params[4] = iota_f;
-        params[5] = psi_f;
-        params[6] = phase_f;
-        
-        
-        //FAST_LISA(params, N_filter, M_filter, F_filter->A1_fX, F_filter->A1_fA, F_filter->A1_fE);
-        // map to conventions for waveform generator
-        params[3]=log(params[3]);
-        params[4]=cos(params[4]);
-        galactic_binary(orbit, data->format, data->T, data->t0[0], params, data->NP, F_filter->A3_fX, F_filter->A3_fA, F_filter->A3_fE, M_filter, 2);
-        
+        source.psi = 0.0;
+        source.phi0 = 3.0*PIon2;
+        X = F_filter->A3_fX;
+        A = F_filter->A3_fA;
+        E = F_filter->A3_fE;
     } else {
-        
-        A_f      = 2.0;
-        iota_f   = PIon2;
-        psi_f    = PIon4;
-        phase_f  = PIon2;
-        
-        params[3] = A_f;
-        params[4] = iota_f;
-        params[5] = psi_f;
-        params[6] = phase_f;
-        
-        
-        //FAST_LISA(params, N_filter, M_filter, F_filter->A1_fX, F_filter->A1_fA, F_filter->A1_fE);
-        // map to conventions for waveform generator
-        params[3]=log(params[3]);
-        params[4]=cos(params[4]);
-        galactic_binary(orbit, data->format, data->T, data->t0[0], params, 9, F_filter->A4_fX, F_filter->A4_fA, F_filter->A4_fE, M_filter, 2);
+        source.psi = PIon4;
+        source.phi0 = PIon2;
+        X = F_filter->A4_fX;
+        A = F_filter->A4_fA;
+        E = F_filter->A4_fE;
     }
-    
-    free(params);
+    galactic_binary_from_source(orbit, data->format, data->T, data->t0[0], &source, data->NP, X, A, E, M_filter, 2);
 }
 
 void get_N(struct Data *data, struct Filter *F_filter)
@@ -634,16 +571,23 @@ void get_Fstat_logL(struct Orbit *orbit, struct Data *data, double f0, double fd
 void get_Fstat_xmax(struct Orbit *orbit, struct Data *data, double *x, double *xmax)
 {
     struct Filter *F_filter = malloc(sizeof(struct Filter));
-        
-    double f0 = x[0]/data->T;
-    double theta = acos(x[1]);
-    double phi = x[2];
-    double fdot = x[7]/(data->T*data->T);
+
+    double f0, theta, phi, fdot;
+    
+    {
+        struct Source temp;
+        map_array_to_params(&temp, x, data->T);
+
+        f0 = temp.f0;
+        theta = acos(temp.costheta);
+        phi = temp.phi;
+        fdot = temp.dfdt;
+    }
 
     F_filter->f0     = f0;
     F_filter->fdot   = fdot;
     F_filter->fddot  = 0.;    //11.0/3.0*fdot*fdot/f0
-    F_filter->q      = (long)x[0];
+    F_filter->q      = (long)x[F0];
     F_filter->theta  = theta;
     F_filter->phi    = phi;
     
@@ -680,10 +624,10 @@ void get_Fstat_xmax(struct Orbit *orbit, struct Data *data, double *x, double *x
     calc_a_i(F_filter);           // calculate the a_{i}'s associated with filters to get F-stat ML params
     get_F_params(F_filter);  // get the F-stat ML parameters
     
-    xmax[3] = log(F_filter->A_AE_Fstat);
-    xmax[4] = cos(F_filter->iota_AE_Fstat);
-    xmax[5] = F_filter->psi_AE_Fstat;
-    xmax[6] = F_filter->phase_AE_Fstat;
+    xmax[AMP] = log(F_filter->A_AE_Fstat);
+    xmax[COSI] = cos(F_filter->iota_AE_Fstat);
+    xmax[PSI] = F_filter->psi_AE_Fstat;
+    xmax[PHI0] = F_filter->phase_AE_Fstat;
     
     free_Filter(F_filter);
 }

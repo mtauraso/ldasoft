@@ -37,73 +37,7 @@
 
 #define FIXME 0
 
-void map_array_to_params(struct Source *source, double *params, double T)
-{
-    source->f0       = params[F0]/T;
-    source->costheta = params[COSTHETA];
-    source->phi      = params[PHI];
 
-    // All legacy params are needed for file I/O because sources and catalog files must 
-    // reflect the parameters of the gravitational wave, regardless of what 
-    // parameterization is in use in memory.
-    //
-    // The legacy params are F0, COSTHETA, PHI, AMP, COSI, PSI, PHI0, and DFDT
-    // Therefore we must always compute them. This assert is paranoia to that effect
-    // which matches if statements below.
-    //
-    // We do these as asserts to prevent unnecessary branches in release code, because
-    // this function is called a lot.
-    //
-    // Assure we calculate amplitude
-    assert(is_param(AMP) || (is_param(DIST) && is_param(MC)));
-    // Assure we calculate dfdt
-    assert(is_param(DFDT) || (is_param(DFDTASTRO) && is_param(MC)));
-
-    if(is_param(AMP))
-        source->amp      = exp(params[AMP]);
-        // Note that when in amplitude only mode there is no
-        // unambiguous way to calculate Mc and D, without assuming a
-        // detached binary.
-    if(is_param(DIST) && is_param(MC)) {
-        source->amp = galactic_binary_Amp(params[MC], source->f0, params[DIST]);
-        source->Mc  = params[MC];
-        source->D   = params[DIST];
-    }
-
-    source->cosi     = params[COSI];
-    source->psi      = params[PSI];
-    source->phi0     = params[PHI0];
-    if(is_param(DFDT))
-        source->dfdt   = params[DFDT]/(T*T);
-    if(is_param(DFDTASTRO) && is_param(MC)) { 
-        source->dfdtastro = params[DFDTASTRO]/(T*T);
-        source->dfdt   =  source->dfdtastro + galactic_binary_fdot(params[MC], source->f0);
-    }
-    if(is_param(D2FDT2))
-        source->d2fdt2 = params[D2FDT2]/(T*T*T);
-}
-
-void map_params_to_array(struct Source *source, double *params, double T)
-{
-    params[F0] = source->f0*T;
-    params[COSTHETA] = source->costheta;
-    params[PHI] = source->phi;
-    if(is_param(AMP))
-        params[AMP] = log(source->amp);
-    params[COSI] = source->cosi;
-    params[PSI] = source->psi;
-    params[PHI0] = source->phi0;
-    if(is_param(DFDT))
-        params[DFDT] = source->dfdt*T*T;
-    if(is_param(DIST))
-        params[DIST] = source->D;
-    if(is_param(MC))
-        params[MC] = source->Mc;
-    if(is_param(DFDTASTRO) && is_param(MC))
-        params[DFDTASTRO] = (source->dfdt - galactic_binary_fdot(source->Mc, source->f0))*T*T;
-    if(is_param(D2FDT2))
-        params[D2FDT2] = source->d2fdt2*T*T*T;
-}
 
 void alloc_data(struct Data *data, struct Flags *flags)
 {
@@ -1167,10 +1101,10 @@ void maximize_signal_model(struct Orbit *orbit, struct Data *data, struct Model 
             get_Fstat_xmax(orbit, data, source->params, Fparams);
             
             /* unpack maximized parameters */
-            source->amp  = exp(Fparams[3]);
-            source->cosi = Fparams[4];
-            source->psi  = Fparams[5];
-            source->phi0 = Fparams[6];
+            source->amp  = exp(Fparams[AMP]);
+            source->cosi = Fparams[COSI];
+            source->psi  = Fparams[PSI];
+            source->phi0 = Fparams[PHI0];
             map_params_to_array(source, source->params, data->T);
         }
         

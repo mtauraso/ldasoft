@@ -24,6 +24,8 @@
 
 #include "gb_params.h"
 
+#ifndef GalacticBinary_h
+#define GalacticBinary_h
 /**
 @file GalacticBinary.h
 \brief Definition of data structures.
@@ -505,3 +507,4 @@ struct Model
 };
 
 
+#endif //GalacticBinary_h
