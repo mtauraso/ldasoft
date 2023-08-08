@@ -420,7 +420,7 @@ void invert_matrix(double **matrix, int N)
     
     if(err>0)
     {
-        fprintf(stderr,"GalacticBinaryMath.c:184: WARNING: singluar matrix\n");
+        fprintf(stderr,"%s:%d: WARNING: singluar matrix\n",__FILE__, __LINE__);
         fflush(stderr);
     }
     else

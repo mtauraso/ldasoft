@@ -353,15 +353,18 @@ double draw_from_volume_prior_uniform(struct Data *data, struct Model * model, s
 {
     double x[3];
     double logP = 0.0;
+    double phi, theta, dist;
 
     // Draw uniformly from galactic bounding box.
     logP += generate_uniform_galaxy_sample(x, seed);
 
     // convert galactocentric xyz to sky location/distance 
-    galactocentric_to_sky_distance(x, &params[PHI], &params[COSTHETA], &params[DIST]);
+    galactocentric_to_sky_distance(x, &phi, &theta, &dist);
 
-    // convert distance from kpc -> pc
-    params[DIST] *= 1000;
+    // convert to the units params expects.
+    params[COSTHETA] = cos(theta);
+    params[PHI] = phi;
+    params[DIST] = dist*1000;
 
     return logP;
 }

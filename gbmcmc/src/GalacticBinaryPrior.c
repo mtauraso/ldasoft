@@ -1026,9 +1026,13 @@ double evaluate_snr_prior(struct Data *data, struct Model *model, double *params
         sf *= asin(data->sine_f_on_fstar);
         
     //get GW amplitude
-    assert(is_param(AMP)); // xcxc todo volume prior check calls to this function
-    double amp = exp(params[AMP]);
-    
+    double amp;
+    {
+        struct Source temp;
+        map_array_to_params(&temp, params, data->T);
+        amp = temp.amp;
+    }
+
     double snr = analytic_snr(amp,sn,sf,data->sqT);
     
     return log(snr_prior(snr));

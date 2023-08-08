@@ -74,25 +74,28 @@ double galactic_binary_dL(double f0, double dfdt, double A)
 // Skip iteration logic for fisher basis cases where a parameter must be skipped.
 int start_param_in_basis(UNUSED int basisindex) {
     // Right now first param (F0) in use in every basis.
+    // If there were a case where we needed to skip F0 
+    // it would need to be added here
     return 0;
 }
 
 int next_param_in_basis(int param_index, int basisindex) {
-    int retval = param_index;
+    int retval = param_index + 1;
 
     if (is_param(MC) && is_param(DFDTASTRO) && is_param(DIST)) {
         int degenerate_parameters[3] = {DIST, MC, DFDTASTRO};
         int param_to_mask = degenerate_parameters[basisindex];
-        retval += (param_index == param_to_mask ? 2 : 1);
+        if( retval == param_to_mask) {
+            retval += 1;
+        }
+        return retval;
     } else if(is_param(AMP)) {
-        retval += 1;
-    } else {
-        fprintf(stderr, "Unimplemented set of parameters. %s:%d\n", __FILE__, __LINE__);
-        exit(1);
-    }
-    return retval;
+        return retval;
+    } 
+    
+    fprintf(stderr, "Unimplemented set of parameters. %s:%d\n", __FILE__, __LINE__);
+    exit(1);
 }
-
 
 void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise, int basisindex)
 {
@@ -235,7 +238,7 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
     }
     
     // Calculate eigenvalues and eigenvectors of fisher matrix
-    matrix_eigenstuff(source->fisher_matrix[basisindex], source->fisher_evectr[basisindex], source->fisher_evalue[basisindex], NP);
+    matrix_eigenstuff(source->fisher_matrix[basisindex], source->fisher_evectr[basisindex], source->fisher_evalue[basisindex], source->fisher_matrix_dim);
     
     free(params_p);
     //free(params_m);
