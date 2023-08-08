@@ -7,12 +7,12 @@ name: ldasoft-gbmcmc-plots
 channels:
   - defaults
   - conda-forge
+  - samreay
 dependencies:
   - seaborn
   - numpy
   - matplotlib
-  - pip
   - ipykernel
   - astropy
-  - pip:
-    - chainconsumer
+  - chainconsumer
+  - h5py
