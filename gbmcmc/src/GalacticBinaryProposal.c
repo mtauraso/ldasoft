@@ -566,26 +566,37 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
     int i,j;
     int NP=source->NP;
 
+    // xcxc remove just for debugging too many sources problem
     assert(source->num_fisher_matrix== 1);
+    assert(NP== source->fisher_matrix_dim);
+    int dim = source->fisher_matrix_dim;
 
     //double sqNP = sqrt((double)source->NP);
-    double Amps[NP];
+    double Amps[dim];
     double jump[NP];
 
     // The only basis index for now
     int basisindex=0;
     
     //draw the eigen-jump amplitudes from N[0,1] scaled by evalue & dimension
-    for(i=0; i<NP; i++)
+    for(i=0; i<dim; i++)
     {
         //Amps[i] = gsl_ran_gaussian(seed,1)/sqrt(source->fisher_evalue[i])/sqNP;
         Amps[i] = gsl_ran_gaussian(seed,1)/sqrt(source->fisher_evalue[basisindex][i]);
+    }
+
+    for(i=0; i<NP; i++) {
         jump[i] = 0.0;
     }
     
     //choose one eigenvector to jump along
     i = (int)(gsl_rng_uniform(seed)*(double)NP);
-    for (j=0; j<NP; j++) jump[j] += Amps[i]*source->fisher_evectr[basisindex][j][i];
+
+    int fisher_index = 0;
+    for(j=start_param_in_basis(basisindex); j<NP; j=next_param_in_basis(j, basisindex)) {
+        jump[j] += Amps[i]*source->fisher_evectr[basisindex][fisher_index][i];
+        fisher_index += 1;
+    }
     
     //check jump value, set to small value if singular
     for(i=0; i<NP; i++) if(jump[i]!=jump[i]) jump[i] = 0.01*source->params[i];

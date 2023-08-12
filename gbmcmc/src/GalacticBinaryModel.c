@@ -753,6 +753,7 @@ void alloc_source(struct Source *source, int NFFT, int Nchannel, int NP)
     alloc_tdi(source->tdi,NFFT, Nchannel);
     
     //FIsher
+    // xcxc use is_params() here to figure out how many basis sets we have
     source->num_fisher_matrix = 1;
     source->fisher_matrix_dim = NP;
 
@@ -771,7 +772,7 @@ void alloc_source(struct Source *source, int NFFT, int Nchannel, int NP)
             source->fisher_evectr[i][j] = calloc(source->fisher_matrix_dim,sizeof(double));
         }
     }
-};
+}
 
 void copy_source(struct Source *origin, struct Source *copy)
 {
