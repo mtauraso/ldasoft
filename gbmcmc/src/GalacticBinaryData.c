@@ -954,15 +954,15 @@ void GalacticBinaryInjectSimulatedSource(struct Data *data, struct Orbit *orbit,
                         fprintf(stdout," ");
                         for(int j=0; j<data->NP; j++)
                         {
-                            if(inj->fisher_matrix[i][j]<0)fprintf(stdout,"%.2e ", inj->fisher_matrix[i][j]);
-                            else                          fprintf(stdout,"+%.2e ",inj->fisher_matrix[i][j]);
+                            if(inj->fisher_matrix[0][i][j]<0)fprintf(stdout,"%.2e ", inj->fisher_matrix[0][i][j]);
+                            else                          fprintf(stdout,"+%.2e ",inj->fisher_matrix[0][i][j]);
                         }
                         fprintf(stdout,"\n");
                     }
                     
                     
                     printf("\n Fisher std. errors:\n");
-                    for(int j=0; j<data->NP; j++)  fprintf(stdout," %.4e\n", sqrt(inj->fisher_matrix[j][j]));
+                    for(int j=0; j<data->NP; j++)  fprintf(stdout," %.4e\n", sqrt(inj->fisher_matrix[0][j][j]));
                 }
                 
                 pathprintf(filename,"%s/data/power_data_%i_%i.dat",flags->runDir,ii,jj);

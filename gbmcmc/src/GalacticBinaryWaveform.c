@@ -20,6 +20,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #include <gsl/gsl_fft_complex.h>
 
@@ -69,7 +70,7 @@ double galactic_binary_dL(double f0, double dfdt, double A)
     return ((5./48.)*(fd/(M_PI*M_PI*f*f*f*amp))*CLIGHT/PC); //seconds  !check notes on 02/28!
 }
 
-void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise)
+void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise, int basisindex)
 {
     //TODO:  galactic_binary_fisher should compute joint Fisher
     int i,j,n;
@@ -178,17 +179,17 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
             switch(source->tdi->Nchannel)
             {
                 case 1:
-                    source->fisher_matrix[i][j] += fourier_nwip(dhdx[i]->X, dhdx[j]->X, noise->SnX, data->N);
+                    source->fisher_matrix[basisindex][i][j] += fourier_nwip(dhdx[i]->X, dhdx[j]->X, noise->SnX, data->N);
                     break;
                 case 2:
-                    source->fisher_matrix[i][j] += fourier_nwip(dhdx[i]->A, dhdx[j]->A, noise->SnA, data->N);
-                    source->fisher_matrix[i][j] += fourier_nwip(dhdx[i]->E, dhdx[j]->E, noise->SnE, data->N);
+                    source->fisher_matrix[basisindex][i][j] += fourier_nwip(dhdx[i]->A, dhdx[j]->A, noise->SnA, data->N);
+                    source->fisher_matrix[basisindex][i][j] += fourier_nwip(dhdx[i]->E, dhdx[j]->E, noise->SnE, data->N);
                     break;
             }
-            if(source->fisher_matrix[i][j]!=source->fisher_matrix[i][j])
+            if(source->fisher_matrix[basisindex][i][j]!=source->fisher_matrix[basisindex][i][j])
             {
                 fprintf(stderr,"WARNING: nan matrix element (line %d of file %s)\n",__LINE__,__FILE__);
-                fprintf(stderr, "fisher_matrix[%i][%i], Snf=[%g,%g]\n",i,j,noise->SnA[data->N/2],noise->SnE[data->N/2]);
+                fprintf(stderr, "fisher_matrix[%i][%i][%i], Snf=[%g,%g]\n",basisindex,i,j,noise->SnA[data->N/2],noise->SnE[data->N/2]);
                 for(int k=0; k<NP; k++)
                 {
                     fprintf(stderr,"source->params[%i]=%g\n",k,source->params[k]);
@@ -199,14 +200,14 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
                 fprintf(stderr, "source->Y=%g\n",source->Y);
                 fprintf(stderr, "source->Z=%g\n",source->Z);
                 
-                source->fisher_matrix[i][j] = 10.0;
+                source->fisher_matrix[basisindex][i][j] = 10.0;
             }
-            source->fisher_matrix[j][i] = source->fisher_matrix[i][j];
+            source->fisher_matrix[basisindex][j][i] = source->fisher_matrix[basisindex][i][j];
         }
     }
     
     // Calculate eigenvalues and eigenvectors of fisher matrix
-    matrix_eigenstuff(source->fisher_matrix, source->fisher_evectr, source->fisher_evalue, NP);
+    matrix_eigenstuff(source->fisher_matrix[basisindex], source->fisher_evectr[basisindex], source->fisher_evalue[basisindex], NP);
     
     free(params_p);
     //free(params_m);
@@ -217,6 +218,13 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
     free(dhdx);
 }
 
+void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise) 
+{
+    assert(source->num_fisher_matrix == 1);
+    for(int i=0; i<source->num_fisher_matrix; i++) {
+        galactic_binary_fisher_helper(orbit, data, source, noise, i);
+    }
+}
 
 int galactic_binary_bandwidth(double L, double fstar, double f, double fdot, double costheta, double A, double T, int N)
 {

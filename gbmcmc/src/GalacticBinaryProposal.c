@@ -565,21 +565,27 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
 {
     int i,j;
     int NP=source->NP;
+
+    assert(source->num_fisher_matrix== 1);
+
     //double sqNP = sqrt((double)source->NP);
     double Amps[NP];
     double jump[NP];
+
+    // The only basis index for now
+    int basisindex=0;
     
     //draw the eigen-jump amplitudes from N[0,1] scaled by evalue & dimension
     for(i=0; i<NP; i++)
     {
         //Amps[i] = gsl_ran_gaussian(seed,1)/sqrt(source->fisher_evalue[i])/sqNP;
-        Amps[i] = gsl_ran_gaussian(seed,1)/sqrt(source->fisher_evalue[i]);
+        Amps[i] = gsl_ran_gaussian(seed,1)/sqrt(source->fisher_evalue[basisindex][i]);
         jump[i] = 0.0;
     }
     
     //choose one eigenvector to jump along
     i = (int)(gsl_rng_uniform(seed)*(double)NP);
-    for (j=0; j<NP; j++) jump[j] += Amps[i]*source->fisher_evectr[j][i];
+    for (j=0; j<NP; j++) jump[j] += Amps[i]*source->fisher_evectr[basisindex][j][i];
     
     //check jump value, set to small value if singular
     for(i=0; i<NP; i++) if(jump[i]!=jump[i]) jump[i] = 0.01*source->params[i];
