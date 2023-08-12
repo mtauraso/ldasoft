@@ -754,6 +754,7 @@ void alloc_source(struct Source *source, int NFFT, int Nchannel, int NP)
     
     //FIsher
     source->num_fisher_matrix = 1;
+    source->fisher_matrix_dim = NP;
 
     source->fisher_matrix = malloc(source->num_fisher_matrix * sizeof(double *));
     source->fisher_evectr = malloc(source->num_fisher_matrix * sizeof(double *));
@@ -761,13 +762,13 @@ void alloc_source(struct Source *source, int NFFT, int Nchannel, int NP)
 
     for(int i=0; i < source->num_fisher_matrix; i++) {
 
-        source->fisher_matrix[i] = malloc(NP*sizeof(double *));
-        source->fisher_evectr[i] = malloc(NP*sizeof(double *));
-        source->fisher_evalue[i] = calloc(NP,sizeof(double));
-        for(int j=0; j<NP; j++)
+        source->fisher_matrix[i] = malloc(source->fisher_matrix_dim*sizeof(double *));
+        source->fisher_evectr[i] = malloc(source->fisher_matrix_dim*sizeof(double *));
+        source->fisher_evalue[i] = calloc(source->fisher_matrix_dim,sizeof(double));
+        for(int j=0; j<source->fisher_matrix_dim; j++)
         {
-            source->fisher_matrix[i][j] = calloc(NP,sizeof(double));
-            source->fisher_evectr[i][j] = calloc(NP,sizeof(double));
+            source->fisher_matrix[i][j] = calloc(source->fisher_matrix_dim,sizeof(double));
+            source->fisher_evectr[i][j] = calloc(source->fisher_matrix_dim,sizeof(double));
         }
     }
 };
@@ -820,12 +821,14 @@ void copy_source(struct Source *origin, struct Source *copy)
     // Memory access to fisher elements depends on them, and they should not
     // be different for live data structures at runtime.
     assert(origin->num_fisher_matrix == copy->num_fisher_matrix);
+    assert(origin->fisher_matrix_dim == copy->fisher_matrix_dim);
+    assert(origin->fisher_matrix_dim == origin->NP);
 
     for(int i=0; i<origin->num_fisher_matrix; i++) {
 
         memcpy(copy->fisher_evalue[i], origin->fisher_evalue[i], origin->NP*sizeof(double));
 
-        for(int j=0; j<origin->NP; j++)
+        for(int j=0; j<origin->fisher_matrix_dim; j++)
         {
             memcpy(copy->fisher_matrix[i][j], origin->fisher_matrix[i][j], origin->NP*sizeof(double));
             memcpy(copy->fisher_evectr[i][j], origin->fisher_evectr[i][j], origin->NP*sizeof(double));
@@ -836,9 +839,10 @@ void copy_source(struct Source *origin, struct Source *copy)
 
 void free_source(struct Source *source)
 {
-    int NP=source->NP;
+    int dim = source->fisher_matrix_dim;
+    
     for(int i=0; i<source->num_fisher_matrix; i++) {
-        for(int j=0; j<NP; j++)
+        for(int j=0; j<dim; j++)
         {
             free(source->fisher_matrix[i][j]);
             free(source->fisher_evectr[i][j]);

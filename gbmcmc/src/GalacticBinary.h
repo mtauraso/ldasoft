@@ -374,6 +374,7 @@ struct Source
     ///See galactic_binary_fisher()
     ///@{
     int num_fisher_matrix;
+    int fisher_matrix_dim;
     double ***fisher_matrix; //!<Fisher approximation to inverse covariance matrix
     double ***fisher_evectr; //!<Eigenvectors of covariance matrix
     double **fisher_evalue;  //!<Eigenvalues of covariance matrix

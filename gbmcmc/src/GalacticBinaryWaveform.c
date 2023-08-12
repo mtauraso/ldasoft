@@ -70,13 +70,47 @@ double galactic_binary_dL(double f0, double dfdt, double A)
     return ((5./48.)*(fd/(M_PI*M_PI*f*f*f*amp))*CLIGHT/PC); //seconds  !check notes on 02/28!
 }
 
+int start_param_in_basis(int basisindex) {
+    // Right now first param (F0) in use in every basis.
+    return 0;
+}
+
+int next_param_in_basis(int param_index, int basisindex) {
+    // xcxc debugging too many sources problem
+    assert(is_param(AMP));
+    assert(!(is_param(MC) && is_param(DFDTASTRO) && is_param(DIST)));
+
+    int retval = param_index;
+
+    if (is_param(MC) && is_param(DFDTASTRO) && is_param(DIST)) {
+        int degenerate_parameters[3] = {DIST, MC, DFDTASTRO};
+        int param_to_mask = degenerate_parameters[basisindex];
+        retval += (param_index == param_to_mask ? 2 : 1);
+    } else if(is_param(AMP)) {
+        retval += 1;
+    } else {
+        fprintf(stderr, "Unimplemented set of parameters. %s:%d\n", __FILE__, __LINE__);
+        exit(1);
+    }
+
+    // xcxc debugging too many sources problem
+    assert(retval == param_index + 1);
+    return retval;
+}
+
+
 void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise, int basisindex)
 {
     //TODO:  galactic_binary_fisher should compute joint Fisher
     int i,j,n;
     
     int NP = source->NP;
+    int dim = source->fisher_matrix_dim;
     
+    // xcxc remove, just for debugging too-many-sources problem
+    assert(NP==source->fisher_matrix_dim);
+    assert(source->num_fisher_matrix == 1);
+
     double epsilon    = 1.0e-7;
     //double invepsilon2= 1./(2.*epsilon);
     double invepsilon2= 1./(epsilon);
@@ -93,8 +127,8 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
     //alloc_source(wave_m, data->N, data->Nchannel, NP);
     
     // TDI variables to hold derivatives of h
-    struct TDI **dhdx = malloc(NP*sizeof(struct TDI *));
-    for(n=0; n<NP; n++)
+    struct TDI **dhdx = malloc(dim*sizeof(struct TDI *));
+    for(n=0; n<dim; n++)
     {
         dhdx[n] = malloc(sizeof(struct TDI));
         alloc_tdi(dhdx[n], data->N, data->Nchannel);
@@ -102,8 +136,14 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
     
     /* assumes all the parameters are log or angle */
     int N2 = data->N*2;
-    for(i=0; i<NP; i++)
+    
+    /* Tracks the parameter index in the fisher basis in use since i in the below loop will skip values outside our fisher basis */
+    int fisher_index = 0; 
+    for(i=start_param_in_basis(basisindex); i<NP; i=next_param_in_basis(i, basisindex))
     {
+        //xcxc paranoia for too many sources problem
+        assert(basisindex == 0);
+
         //step size for derivatives
         invstep = invepsilon2;
         
@@ -148,6 +188,9 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
         galactic_binary(orbit, data->format, data->T, data->t0[0], wave_p->params, NP, wave_p->tdi->X, wave_p->tdi->A, wave_p->tdi->E, wave_p->BW, wave_p->tdi->Nchannel);
         //galactic_binary(orbit, data->format, data->T, data->t0[0], wave_m->params, NP, wave_m->tdi->X, wave_m->tdi->A, wave_m->tdi->E, wave_m->BW, wave_m->tdi->Nchannel);
         
+        assert(fisher_index < source->fisher_matrix_dim);
+        assert(fisher_index == i);
+
         // central differencing derivatives of waveforms w.r.t. parameters
         switch(source->tdi->Nchannel)
         {
@@ -155,7 +198,7 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
                 for(n=0; n<N2; n++)
                 {
 //                    dhdx[i]->X[n] = (wave_p->tdi->X[n] - wave_m->tdi->X[n])*invstep;
-                    dhdx[i]->X[n] = (wave_p->tdi->X[n] - source->tdi->X[n])*invstep;
+                    dhdx[fisher_index]->X[n] = (wave_p->tdi->X[n] - source->tdi->X[n])*invstep;
                 }
                 break;
             case 2:
@@ -163,17 +206,18 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
                 {
 //                    dhdx[i]->A[n] = (wave_p->tdi->A[n] - wave_m->tdi->A[n])*invstep;
 //                    dhdx[i]->E[n] = (wave_p->tdi->E[n] - wave_m->tdi->E[n])*invstep;
-                    dhdx[i]->A[n] = (wave_p->tdi->A[n] - source->tdi->A[n])*invstep;
-                    dhdx[i]->E[n] = (wave_p->tdi->E[n] - source->tdi->E[n])*invstep;
+                    dhdx[fisher_index]->A[n] = (wave_p->tdi->A[n] - source->tdi->A[n])*invstep;
+                    dhdx[fisher_index]->E[n] = (wave_p->tdi->E[n] - source->tdi->E[n])*invstep;
                 }
                 break;
         }
+        fisher_index += 1;
     }
     
     // Calculate fisher matrix
-    for(i=0; i<NP; i++)
+    for(i=0; i<dim; i++)
     {
-        for(j=i; j<NP; j++)
+        for(j=i; j<dim; j++)
         {
             //source->fisher_matrix[i][j] = 10.0; //fisher gets a "DC" level to keep the inversion stable
             switch(source->tdi->Nchannel)
@@ -214,7 +258,7 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
     free_source(wave_p);
     //free_source(wave_m);
     
-    for(n=0; n<NP; n++) free_tdi(dhdx[n]);
+    for(n=0; n<dim; n++) free_tdi(dhdx[n]);
     free(dhdx);
 }
 
