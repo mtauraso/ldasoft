@@ -565,18 +565,17 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
 {
     int i,j;
     int NP=source->NP;
-
-    // xcxc remove just for debugging too many sources problem
-    assert(source->num_fisher_matrix== 1);
-    assert(NP== source->fisher_matrix_dim);
     int dim = source->fisher_matrix_dim;
 
     //double sqNP = sqrt((double)source->NP);
     double Amps[dim];
     double jump[NP];
 
-    // The only basis index for now
+    // Choose a basis for this fisher draw if needed
     int basisindex=0;
+    if(source->num_fisher_matrix > 1) {
+        basisindex = (int)(gsl_rng_uniform(seed)*(double)source->num_fisher_matrix);
+    }
     
     //draw the eigen-jump amplitudes from N[0,1] scaled by evalue & dimension
     for(i=0; i<dim; i++)
@@ -606,9 +605,9 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
     
     //safety check for cos(latitude) parameters
     //cosine co-latitude
-    if(params[1] >= 1.) params[1] = source->params[1] - jump[1];
+    if(params[COSTHETA] >= 1.) params[COSTHETA] = source->params[COSTHETA] - jump[COSTHETA];
     //cosine inclination
-    if(params[4] >= 1.) params[4] = source->params[4] - jump[4];
+    if(params[COSI] >= 1.) params[COSI] = source->params[COSI] - jump[COSI];
     
     for(int j=0; j<NP; j++)
     {
@@ -617,26 +616,6 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
             fprintf(stderr,"draw_from_fisher: params[%i]=%g, N[%g,%g]\n",j,params[j],source->params[j],jump[j]);
             return -INFINITY;
         }
-    }
-    
-    //xcxc TODO volume prior
-    // We changed amplitude and sky location. Fixup distance holding Mc constant
-    // Then Fixup source->XYZ keeping distance constant.
-    if (source->D != 0.0) {
-
-        // This is a kludge. The convention replicated here is in map_array_to_params()
-        double f0 = params[0]/data->T;
-        double A = exp(params[3]);
-
-        // Figure distance based on amplitude in KPC
-        source->D = galactic_binary_dL_from_Mc(f0, A, source->Mc)/1000;
-
-        // Figure 3d position based on computed distance
-        double x[3];
-        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
-        source->X = x[0];
-        source->Y = x[1];
-        source->Z = x[2];
     }
 
     //not updating Fisher between moves, proposal is symmetric

@@ -70,16 +70,12 @@ double galactic_binary_dL(double f0, double dfdt, double A)
     return ((5./48.)*(fd/(M_PI*M_PI*f*f*f*amp))*CLIGHT/PC); //seconds  !check notes on 02/28!
 }
 
-int start_param_in_basis(int basisindex) {
+int start_param_in_basis(UNUSED int basisindex) {
     // Right now first param (F0) in use in every basis.
     return 0;
 }
 
 int next_param_in_basis(int param_index, int basisindex) {
-    // xcxc debugging too many sources problem
-    assert(is_param(AMP));
-    assert(!(is_param(MC) && is_param(DFDTASTRO) && is_param(DIST)));
-
     int retval = param_index;
 
     if (is_param(MC) && is_param(DFDTASTRO) && is_param(DIST)) {
@@ -92,9 +88,6 @@ int next_param_in_basis(int param_index, int basisindex) {
         fprintf(stderr, "Unimplemented set of parameters. %s:%d\n", __FILE__, __LINE__);
         exit(1);
     }
-
-    // xcxc debugging too many sources problem
-    assert(retval == param_index + 1);
     return retval;
 }
 
@@ -106,10 +99,6 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
     
     int NP = source->NP;
     int dim = source->fisher_matrix_dim;
-    
-    // xcxc remove, just for debugging too-many-sources problem
-    assert(NP==source->fisher_matrix_dim);
-    assert(source->num_fisher_matrix == 1);
 
     double epsilon    = 1.0e-7;
     //double invepsilon2= 1./(2.*epsilon);
@@ -141,9 +130,6 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
     int fisher_index = 0; 
     for(i=start_param_in_basis(basisindex); i<NP; i=next_param_in_basis(i, basisindex))
     {
-        //xcxc paranoia for too many sources problem
-        assert(basisindex == 0);
-
         //step size for derivatives
         invstep = invepsilon2;
         
@@ -159,7 +145,7 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
         //wave_m->params[i] -= epsilon;
         
 	    // catch when cosine parameters get pushed out of bounds
-        if(i==1 || i==4)
+        if(i==COSTHETA || i==COSI)
         {
             if(wave_p->params[i] > 1.0) wave_p->params[i] = 1.0;
             //if(wave_m->params[i] <-1.0) wave_m->params[i] =-1.0;
@@ -189,7 +175,6 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
         //galactic_binary(orbit, data->format, data->T, data->t0[0], wave_m->params, NP, wave_m->tdi->X, wave_m->tdi->A, wave_m->tdi->E, wave_m->BW, wave_m->tdi->Nchannel);
         
         assert(fisher_index < source->fisher_matrix_dim);
-        assert(fisher_index == i);
 
         // central differencing derivatives of waveforms w.r.t. parameters
         switch(source->tdi->Nchannel)
@@ -264,7 +249,6 @@ void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struc
 
 void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise) 
 {
-    assert(source->num_fisher_matrix == 1);
     for(int i=0; i<source->num_fisher_matrix; i++) {
         galactic_binary_fisher_helper(orbit, data, source, noise, i);
     }

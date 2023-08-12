@@ -31,6 +31,14 @@
 
 #define MAXSTRINGSIZE 1024 //!<maximum number of characters for a line in a data file.
 
+// Syntactic sugar for telling GCC a parameter is known to be unused 
+// to supress unused parameter warnings in cases where it is inappropriate to act on them
+#ifdef __GNUC__
+#define UNUSED __attribute__ ((unused))
+#else
+#define UNUSED
+#endif
+
 /*!
  * \brief Analaysis segment and meta data about size of segment, location in full data stream, and LISA observation parameters.
  *
