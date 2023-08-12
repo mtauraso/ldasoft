@@ -758,6 +758,15 @@ void GalacticBinaryInjectVerificationSource(struct Data *data, struct Orbit *orb
 }
 void GalacticBinaryInjectSimulatedSource(struct Data *data, struct Orbit *orbit, struct Flags *flags)
 {
+    // xcxc reparameterization IO
+    // TODO: modify this function so it is possible to inject a simulated source in volume prior mode
+    // For now error loudly if both things are in use. This is inherently a parameter layout
+    // decision about how injected binaries are specified w.r.t. our search parameters.
+    if(flags->volumePrior) {
+        fprintf(stderr, "Cannot inject a source in --volume-pior mode. Functionality unimplemented\n");
+        exit(1);
+    }
+
     FILE *fptr;
     
     /* Get injection parameters */
@@ -954,15 +963,15 @@ void GalacticBinaryInjectSimulatedSource(struct Data *data, struct Orbit *orbit,
                         fprintf(stdout," ");
                         for(int j=0; j<data->NP; j++)
                         {
-                            if(inj->fisher_matrix[i][j]<0)fprintf(stdout,"%.2e ", inj->fisher_matrix[i][j]);
-                            else                          fprintf(stdout,"+%.2e ",inj->fisher_matrix[i][j]);
+                            if(inj->fisher_matrix[0][i][j]<0)fprintf(stdout,"%.2e ", inj->fisher_matrix[0][i][j]);
+                            else                             fprintf(stdout,"+%.2e ",inj->fisher_matrix[0][i][j]);
                         }
                         fprintf(stdout,"\n");
                     }
                     
                     
                     printf("\n Fisher std. errors:\n");
-                    for(int j=0; j<data->NP; j++)  fprintf(stdout," %.4e\n", sqrt(inj->fisher_matrix[j][j]));
+                    for(int j=0; j<data->NP; j++)  fprintf(stdout," %.4e\n", sqrt(inj->fisher_matrix[0][j][j]));
                 }
                 
                 pathprintf(filename,"%s/data/power_data_%i_%i.dat",flags->runDir,ii,jj);

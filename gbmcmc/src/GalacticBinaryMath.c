@@ -363,8 +363,20 @@ void matrix_eigenstuff(double **matrix, double **evector, double *evalue, int N)
             evalue[i] = gsl_vector_get(GSLevalue,i);
             for(j=0; j<N; j++)
             {
-                evector[i][j] = gsl_matrix_get(GSLevectr,i,j);
-                if(evector[i][j] != evector[i][j]) evector[i][j] = 0.;
+                // GSL stores eigenvectors as column vectors and therefore each 
+                // eigenvector is not contiguous in memory. 
+                //
+                // We transpose here such that the ith eigenvector is stored in a contiguous
+                // memory region starting at evector[i]. This simplifies usage of source->fisher_eval later on.
+                //
+                // i,j ordering in gsl_matrix_get call is for cache locality on reads
+                // writes will (hopefully) be pipelined and this memory won't be read for a while.
+                evector[j][i] = gsl_matrix_get(GSLevectr,i,j);
+                if(evector[j][i] != evector[j][i]) evector[j][i] = 0.;
+
+                //xcxc put back to old ordering
+                //evector[i][j] = gsl_matrix_get(GSLevectr,i,j);
+                //if(evector[i][j] != evector[i][j]) evector[i][j] = 0.;
             }
         }
                 

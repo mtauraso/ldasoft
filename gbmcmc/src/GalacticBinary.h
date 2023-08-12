@@ -31,6 +31,14 @@
 
 #define MAXSTRINGSIZE 1024 //!<maximum number of characters for a line in a data file.
 
+// Syntactic sugar for telling GCC a parameter is known to be unused 
+// to supress unused parameter warnings in cases where it is inappropriate to act on them
+#ifdef __GNUC__
+#define UNUSED __attribute__ ((unused))
+#else
+#define UNUSED
+#endif
+
 /*!
  * \brief Analaysis segment and meta data about size of segment, location in full data stream, and LISA observation parameters.
  *
@@ -373,9 +381,11 @@ struct Source
     ///@name Fisher Information Matrix
     ///See galactic_binary_fisher()
     ///@{
-    double **fisher_matrix; //!<Fisher approximation to inverse covariance matrix
-    double **fisher_evectr; //!<Eigenvectors of covariance matrix
-    double *fisher_evalue;  //!<Eigenvalues of covariance matrix
+    int num_fisher_matrix;   //!<Number of fisher matricies we have for different parameter basis choices.
+    int fisher_matrix_dim;   //!<Dimension of the fisher matrix. May be different from the size of params.
+    double ***fisher_matrix; //!<Fisher approximation to inverse covariance matrix. Several copies for different possible basis sets
+    double ***fisher_evectr; //!<Eigenvectors of covariance matrix
+    double **fisher_evalue;  //!<Eigenvalues of covariance matrix
     int fisher_update_flag; //!<1 if fisher needs update, 0 if not
     ///@}
 };

@@ -561,37 +561,114 @@ double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED stru
     return evaluate_snr_prior(data, model, params);
 }
 
+
+// xcxc put the skip iterator one place
+// Skip iteration logic for fisher basis cases where a parameter must be skipped.
+static inline int start_param_in_basis(UNUSED int basisindex) {
+    // Right now first param (F0) in use in every basis.
+    return 0;
+}
+
+static inline int next_param_in_basis(int param_index, int basisindex) {
+    if (is_param(MC) && is_param(DFDTASTRO) && is_param(DIST)) {
+        int degenerate_parameters[3] = {DIST, MC, DFDTASTRO};
+        int param_to_mask = degenerate_parameters[basisindex];
+        //xcxc debugging
+        assert(false);
+        return param_index + (param_index == param_to_mask ? 2 : 1);
+    } else if(is_param(AMP)) {
+        return param_index + 1;
+    } else {
+        fprintf(stderr, "Unimplemented set of parameters. %s:%d\n", __FILE__, __LINE__);
+        exit(1);
+    }
+}
+
+#if 0
+// Convert the evectr in the fisher basis to our dominant (degenerate) basis used by search algo/params array
+// Put the result in evectr_out which is assumed to be the right size. Any values missing from evectr are 
+// filled in with 0.0.
+// 
+// In:
+// evectr: array of params in the given fisher basis
+// dim: fisher basis dimension
+// basisindex: index of the fisher matrix basis used
+// NP: number of parameters in normal basis
+// 
+// Out:
+// evectr_out: Array to put params in full search basis. Assumed to be allocated and the correct size
+void evectr_to_params_basis(/*in*/ double * evectr, /*in*/ int dim, /*in*/int basisindex, /*out*/ double * evectr_out) {
+    if(is_param(AMP)) {
+        memcpy(evectr_out, evectr, dim);
+    } else if (is_param(MC) && is_param(DFDTASTRO) && is_param(DIST)) {
+        int degenerate_parameters[3] = {DIST, MC, DFDTASTRO};
+        int missing_param = degenerate_parameters[basisindex];
+        int offset = 0;
+        for(int i = 0; i< dim + 1; i++) {
+            if(i == missing_param) {
+                evectr_out[i] = 0.0;
+                offset += 1;
+            } else {
+                evectr_out[i] = evectr[i-offset];
+            }
+        }
+    } else {
+        fprintf(stderr, "Unimplemented set of parameters. %s:%d\n", __FILE__, __LINE__);
+        exit(1);
+    }
+}
+#endif
+
 double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
 {
     int i,j;
     int NP=source->NP;
+    // xcxc remove, just for debugging too-many-sources problem
+    assert(NP==source->fisher_matrix_dim);
+    assert(source->num_fisher_matrix== 1);
+    int dim = source->fisher_matrix_dim;
     //double sqNP = sqrt((double)source->NP);
-    double Amps[NP];
+    double Amps[dim];
     double jump[NP];
-    
+
+    // Chhose the basis for our jump randomly
+    int basisindex = 0;
+    if(source->num_fisher_matrix > 1) {
+        basisindex = (int)(gsl_rng_uniform(seed)*(double)source->num_fisher_matrix);
+    }
+
+    for(j=0; j<NP; j++) jump[j] = 0.0;
     //draw the eigen-jump amplitudes from N[0,1] scaled by evalue & dimension
-    for(i=0; i<NP; i++)
+    for(i=0; i<dim; i++)
     {
         //Amps[i] = gsl_ran_gaussian(seed,1)/sqrt(source->fisher_evalue[i])/sqNP;
-        Amps[i] = gsl_ran_gaussian(seed,1)/sqrt(source->fisher_evalue[i]);
-        jump[i] = 0.0;
+        Amps[i] = gsl_ran_gaussian(seed,1)/sqrt(source->fisher_evalue[basisindex][i]);
     }
-    
+
     //choose one eigenvector to jump along
-    i = (int)(gsl_rng_uniform(seed)*(double)NP);
-    for (j=0; j<NP; j++) jump[j] += Amps[i]*source->fisher_evectr[j][i];
+    i = (int)(gsl_rng_uniform(seed)*(double)dim);
+    double *evectr_jump = calloc(NP, sizeof(double));
+
+    //evectr_to_params_basis(source->fisher_evectr[basisindex][i], dim, basisindex, evectr_jump);
+    for(int j = start_param_in_basis(basisindex); j < NP; j += next_param_in_basis(j, basisindex)) {
+        evectr_jump[j] = source->fisher_evectr[basisindex][i][j];
+        //back to old order
+        //evectr_jump[j] = source->fisher_evectr[basisindex][j][i];
+    }
+
+    for (j=0; j<NP; j++) jump[j] += Amps[i]*evectr_jump[j];
     
     //check jump value, set to small value if singular
-    for(i=0; i<NP; i++) if(jump[i]!=jump[i]) jump[i] = 0.01*source->params[i];
+    for(j=0; j<NP; j++) if(jump[j]!=jump[j]) jump[j] = 0.01*source->params[j];
     
     //jump from current position
-    for(i=0; i<NP; i++) params[i] = source->params[i] + jump[i];
+    for(j=0; j<NP; j++) params[j] = source->params[j] + jump[j];
     
     //safety check for cos(latitude) parameters
     //cosine co-latitude
-    if(params[1] >= 1.) params[1] = source->params[1] - jump[1];
+    if(params[COSTHETA] >= 1.) params[COSTHETA] = source->params[COSTHETA] - jump[COSTHETA];
     //cosine inclination
-    if(params[4] >= 1.) params[4] = source->params[4] - jump[4];
+    if(params[COSI] >= 1.) params[COSI] = source->params[COSI] - jump[COSI];
     
     for(int j=0; j<NP; j++)
     {
@@ -601,26 +678,8 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
             return -INFINITY;
         }
     }
-    
-    //xcxc TODO volume prior
-    // We changed amplitude and sky location. Fixup distance holding Mc constant
-    // Then Fixup source->XYZ keeping distance constant.
-    if (source->D != 0.0) {
 
-        // This is a kludge. The convention replicated here is in map_array_to_params()
-        double f0 = params[0]/data->T;
-        double A = exp(params[3]);
-
-        // Figure distance based on amplitude in KPC
-        source->D = galactic_binary_dL_from_Mc(f0, A, source->Mc)/1000;
-
-        // Figure 3d position based on computed distance
-        double x[3];
-        sky_distance_to_galactocentric(x, params[2], params[1], source->D);
-        source->X = x[0];
-        source->Y = x[1];
-        source->Z = x[2];
-    }
+    free(evectr_jump);
 
     //not updating Fisher between moves, proposal is symmetric
     return 0.0;

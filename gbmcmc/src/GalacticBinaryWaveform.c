@@ -20,6 +20,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #include <gsl/gsl_fft_complex.h>
 
@@ -69,12 +70,37 @@ double galactic_binary_dL(double f0, double dfdt, double A)
     return ((5./48.)*(fd/(M_PI*M_PI*f*f*f*amp))*CLIGHT/PC); //seconds  !check notes on 02/28!
 }
 
-void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise)
+// Skip iteration logic for fisher basis cases where a parameter must be skipped.
+static inline int start_param_in_basis(UNUSED int basisindex) {
+    // Right now first param (F0) in use in every basis.
+    return 0;
+}
+
+static inline int next_param_in_basis(int param_index, int basisindex) {
+    if (is_param(MC) && is_param(DFDTASTRO) && is_param(DIST)) {
+        int degenerate_parameters[3] = {DIST, MC, DFDTASTRO};
+        int param_to_mask = degenerate_parameters[basisindex];
+        //xcxc debugging
+        assert(false);
+        return param_index + (param_index == param_to_mask ? 2 : 1);
+    } else if(is_param(AMP)) {
+        return param_index + 1;
+    } else {
+        fprintf(stderr, "Unimplemented set of parameters. %s:%d\n", __FILE__, __LINE__);
+        exit(1);
+    }
+}
+
+void galactic_binary_fisher_helper(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise, int basisindex)
 {
     //TODO:  galactic_binary_fisher should compute joint Fisher
     int i,j,n;
     
     int NP = source->NP;
+
+    // xcxc remove, just for debugging too-many-sources problem
+    assert(NP==source->fisher_matrix_dim);
+    assert(source->num_fisher_matrix== 1);
     
     double epsilon    = 1.0e-7;
     //double invepsilon2= 1./(2.*epsilon);
@@ -92,8 +118,8 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
     //alloc_source(wave_m, data->N, data->Nchannel, NP);
     
     // TDI variables to hold derivatives of h
-    struct TDI **dhdx = malloc(NP*sizeof(struct TDI *));
-    for(n=0; n<NP; n++)
+    struct TDI **dhdx = malloc(source->fisher_matrix_dim*sizeof(struct TDI *));
+    for(n=0; n<source->fisher_matrix_dim; n++)
     {
         dhdx[n] = malloc(sizeof(struct TDI));
         alloc_tdi(dhdx[n], data->N, data->Nchannel);
@@ -101,7 +127,9 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
     
     /* assumes all the parameters are log or angle */
     int N2 = data->N*2;
-    for(i=0; i<NP; i++)
+    /* Tracks the parameter index in the fisher basis in use since i in the below loop will skip values outside our fisher basis */
+    int fisher_index = 0; 
+    for(i=start_param_in_basis(basisindex); i<NP; i=next_param_in_basis(i,basisindex))
     {
         //step size for derivatives
         invstep = invepsilon2;
@@ -118,7 +146,7 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
         //wave_m->params[i] -= epsilon;
         
 	    // catch when cosine parameters get pushed out of bounds
-        if(i==1 || i==4)
+        if(i==COSTHETA || i==COSI)
         {
             if(wave_p->params[i] > 1.0) wave_p->params[i] = 1.0;
             //if(wave_m->params[i] <-1.0) wave_m->params[i] =-1.0;
@@ -148,13 +176,14 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
         //galactic_binary(orbit, data->format, data->T, data->t0[0], wave_m->params, NP, wave_m->tdi->X, wave_m->tdi->A, wave_m->tdi->E, wave_m->BW, wave_m->tdi->Nchannel);
         
         // central differencing derivatives of waveforms w.r.t. parameters
+        assert(fisher_index < source->fisher_matrix_dim);
         switch(source->tdi->Nchannel)
         {
             case 1:
                 for(n=0; n<N2; n++)
                 {
 //                    dhdx[i]->X[n] = (wave_p->tdi->X[n] - wave_m->tdi->X[n])*invstep;
-                    dhdx[i]->X[n] = (wave_p->tdi->X[n] - source->tdi->X[n])*invstep;
+                    dhdx[fisher_index]->X[n] = (wave_p->tdi->X[n] - source->tdi->X[n])*invstep;
                 }
                 break;
             case 2:
@@ -162,33 +191,35 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
                 {
 //                    dhdx[i]->A[n] = (wave_p->tdi->A[n] - wave_m->tdi->A[n])*invstep;
 //                    dhdx[i]->E[n] = (wave_p->tdi->E[n] - wave_m->tdi->E[n])*invstep;
-                    dhdx[i]->A[n] = (wave_p->tdi->A[n] - source->tdi->A[n])*invstep;
-                    dhdx[i]->E[n] = (wave_p->tdi->E[n] - source->tdi->E[n])*invstep;
+                    dhdx[fisher_index]->A[n] = (wave_p->tdi->A[n] - source->tdi->A[n])*invstep;
+                    dhdx[fisher_index]->E[n] = (wave_p->tdi->E[n] - source->tdi->E[n])*invstep;
                 }
                 break;
         }
+        fisher_index += 1;
     }
     
     // Calculate fisher matrix
-    for(i=0; i<NP; i++)
+    for(i=0; i<source->fisher_matrix_dim; i++)
     {
-        for(j=i; j<NP; j++)
+        for(j=i; j<source->fisher_matrix_dim; j++)
         {
+            source->fisher_matrix[basisindex][i][j] = 0.0;
             //source->fisher_matrix[i][j] = 10.0; //fisher gets a "DC" level to keep the inversion stable
             switch(source->tdi->Nchannel)
             {
                 case 1:
-                    source->fisher_matrix[i][j] += fourier_nwip(dhdx[i]->X, dhdx[j]->X, noise->SnX, data->N);
+                    source->fisher_matrix[basisindex][i][j] += fourier_nwip(dhdx[i]->X, dhdx[j]->X, noise->SnX, data->N);
                     break;
                 case 2:
-                    source->fisher_matrix[i][j] += fourier_nwip(dhdx[i]->A, dhdx[j]->A, noise->SnA, data->N);
-                    source->fisher_matrix[i][j] += fourier_nwip(dhdx[i]->E, dhdx[j]->E, noise->SnE, data->N);
+                    source->fisher_matrix[basisindex][i][j] += fourier_nwip(dhdx[i]->A, dhdx[j]->A, noise->SnA, data->N);
+                    source->fisher_matrix[basisindex][i][j] += fourier_nwip(dhdx[i]->E, dhdx[j]->E, noise->SnE, data->N);
                     break;
             }
-            if(source->fisher_matrix[i][j]!=source->fisher_matrix[i][j])
+            if(source->fisher_matrix[basisindex][i][j]!=source->fisher_matrix[basisindex][i][j])
             {
                 fprintf(stderr,"WARNING: nan matrix element (line %d of file %s)\n",__LINE__,__FILE__);
-                fprintf(stderr, "fisher_matrix[%i][%i], Snf=[%g,%g]\n",i,j,noise->SnA[data->N/2],noise->SnE[data->N/2]);
+                fprintf(stderr, "fisher_matrix[%i][%i][%i], Snf=[%g,%g]\n",basisindex,i,j,noise->SnA[data->N/2],noise->SnE[data->N/2]);
                 for(int k=0; k<NP; k++)
                 {
                     fprintf(stderr,"source->params[%i]=%g\n",k,source->params[k]);
@@ -199,24 +230,28 @@ void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Sourc
                 fprintf(stderr, "source->Y=%g\n",source->Y);
                 fprintf(stderr, "source->Z=%g\n",source->Z);
                 
-                source->fisher_matrix[i][j] = 10.0;
+                source->fisher_matrix[basisindex][i][j] = 10.0;
             }
-            source->fisher_matrix[j][i] = source->fisher_matrix[i][j];
+            source->fisher_matrix[basisindex][j][i] = source->fisher_matrix[basisindex][i][j];
         }
     }
     
     // Calculate eigenvalues and eigenvectors of fisher matrix
-    matrix_eigenstuff(source->fisher_matrix, source->fisher_evectr, source->fisher_evalue, NP);
+    matrix_eigenstuff(source->fisher_matrix[basisindex], source->fisher_evectr[basisindex], source->fisher_evalue[basisindex], NP);
     
     free(params_p);
     //free(params_m);
     free_source(wave_p);
     //free_source(wave_m);
     
-    for(n=0; n<NP; n++) free_tdi(dhdx[n]);
+    for(n=0; n<source->fisher_matrix_dim; n++) free_tdi(dhdx[n]);
     free(dhdx);
 }
 
+void galactic_binary_fisher(struct Orbit *orbit, struct Data *data, struct Source *source, struct Noise *noise) {
+    for(int i=0; i< source->num_fisher_matrix; i++)
+        galactic_binary_fisher_helper(orbit, data, source, noise, i);
+}
 
 int galactic_binary_bandwidth(double L, double fstar, double f, double fdot, double costheta, double A, double T, int N)
 {

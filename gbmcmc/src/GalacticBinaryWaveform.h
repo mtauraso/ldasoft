@@ -85,7 +85,6 @@ double galactic_binary_dL_from_Mc(double f0, double A, double Mc);
  \f$\Gamma_{ij} = \frac{\partial h}{\partial \theta_i} \frac{\partial h}{\partial \theta_j} \f$
  and stores in Source::fisher_matrix.
  Matrix eigenvectors and eigenvalues are then computed using matrix_eigenstuff() and stored in Source::fisher_evectr and Source::fisher_evalue, respectively.
- 
  @param[in] Source::params
  @param[out] Source::fisher_matrix
  @param[out] Source::fisher_evectr

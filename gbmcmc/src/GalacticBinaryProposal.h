@@ -28,11 +28,6 @@
 #ifndef GalacticBinaryProposal_h
 #define GalacticBinaryProposal_h
 
-#ifdef __GNUC__
-#define UNUSED __attribute__ ((unused))
-#else
-#define UNUSED
-#endif
 
 /*!
  \brief Prototype structure for proposal distributions.
