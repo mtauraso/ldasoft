@@ -581,10 +581,6 @@ void GalacticBinaryInjectVerificationSource(struct Data *data, struct Orbit *orb
         }
         
         
-        //incoming distance in kpc, function expects pc
-        D *= 1000.0;
-        
-        
         //draw extrinsic parameters
         
         //set RNG for injection
@@ -600,7 +596,8 @@ void GalacticBinaryInjectVerificationSource(struct Data *data, struct Orbit *orb
         
         //compute derived parameters
         Mc  = chirpmass(m1,m2);
-        amp = galactic_binary_Amp(Mc, f0, D);
+        //incoming distance in kpc, function expects pc
+        amp = galactic_binary_Amp(Mc, f0, D*1000);
         
         for(int jj=0; jj<flags->NT; jj++)
         {
@@ -1037,12 +1034,10 @@ void GetVerificationBinary(struct Data *data, struct Flags *flags, FILE *vbFile)
         exit(1);
     }
     
-    //incoming distance in kpc, function expects pc
-    D *= 1000.0;
-    
     //compute derived parameters
     Mc  = chirpmass(m1,m2);
-    amp = galactic_binary_Amp(Mc, f0, D);
+    //incoming distance in kpc, function expects pc
+    amp = galactic_binary_Amp(Mc, f0, D*1000);
     
     //initialize extrinsic parameters
     phi0 = 0.0;

@@ -211,7 +211,7 @@ static inline void map_array_to_params(struct Source *source, double *params, do
         // unambiguous way to calculate Mc and D, without assuming a
         // detached binary.
     if(is_param(DIST) && is_param(MC)) {
-        source->amp = galactic_binary_Amp(params[MC], source->f0, params[DIST]);
+        source->amp = galactic_binary_Amp(params[MC], source->f0, params[DIST]*1000);
         source->Mc  = params[MC];
         source->D   = params[DIST];
     }

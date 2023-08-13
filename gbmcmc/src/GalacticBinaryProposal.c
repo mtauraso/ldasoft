@@ -364,7 +364,7 @@ double draw_from_volume_prior_uniform(struct Data *data, struct Model * model, s
     // convert to the units params expects.
     params[COSTHETA] = cos(theta);
     params[PHI] = phi;
-    params[DIST] = dist*1000;
+    params[DIST] = dist;
 
     return logP;
 }

@@ -64,7 +64,7 @@ extern int NUM_PARAMS;
 // e.g. params[3] in the old system was AMP.
 // Below this line there should no potential sensitivity of legacy code to the index numbers used.
 #define DIST           (p_Ext2Int[9])
-#define DIST_DESC      "Luminosity distance of source. Measured in pc"
+#define DIST_DESC      "Luminosity distance of source. Measured in kpc"
 #define MC             (p_Ext2Int[10])
 #define MC_DESC        "Chirp mass of binary pair in M_sun units"
 #define DFDTASTRO      (p_Ext2Int[11])

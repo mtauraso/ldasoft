@@ -936,7 +936,7 @@ double evaluate_volume_prior(struct Prior *prior, struct Source *source) {
     double location[3];
     double * params = source->params;
 
-    sky_distance_to_galactocentric(location, params[PHI], params[COSTHETA], params[DIST]/1000.0);
+    sky_distance_to_galactocentric(location, params[PHI], params[COSTHETA], params[DIST]);
 
     // TODO: Find something better to do with this case
     // If the source is outside the glactic bounding box simply ignore it
