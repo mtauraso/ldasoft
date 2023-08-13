@@ -163,29 +163,62 @@ static inline void sample_sky_prior(struct Prior *prior, double *chain_sample)
     prior->skyhist[ith*Nph+iph] += 1.0;
 }
 
-static inline int lookup_volume_prior(struct Prior *prior, double* location) {
-    // Figure out what bucket this sample is in
-    int Bx = (int)((location[0] + GALAXY_BB_X*0.5) / (prior->dx));
-    int By = (int)((location[1] + GALAXY_BB_Y*0.5) / (prior->dy));
-    int Bz = (int)((location[2] + GALAXY_BB_Z*0.5) / (prior->dz));
+static inline void bucket_to_location(struct Prior *prior, int *bucket, /*OUT*/ double *location) {
+    // Convert a set of bucket indexes to galactocentric x,y,z coordinates in kpc of the center of that bucket
+    location[0] = bucket[0]*prior->dx - GALAXY_BB_X*0.5 + prior->dx*0.5;
+    location[1] = bucket[1]*prior->dy - GALAXY_BB_Y*0.5 + prior->dy*0.5;
+    location[2] = bucket[2]*prior->dz - GALAXY_BB_Z*0.5 + prior->dz*0.5;
+}
 
-    if(Bx < 0 || By < 0 || Bz < 0) {
-        printf("Out of bounds access to volhist: %d %d %d\n", Bx, By, Bz);
-    }
+static inline void location_to_bucket(struct Prior *prior, double *location, /*OUT*/ int *bucket ) {
+    // Convert a galactocentric location (x,y,z) in kpc to the bucket that point is in
+    bucket[0] = (int)((location[0] + GALAXY_BB_X*0.5) / (prior->dx));
+    bucket[1] = (int)((location[1] + GALAXY_BB_Y*0.5) / (prior->dy));
+    bucket[2] = (int)((location[2] + GALAXY_BB_Z*0.5) / (prior->dz));
+    
+    if(bucket[0] < 0 || bucket[0] > prior->nx || 
+       bucket[1] < 0 || bucket[1] > prior->ny ||
+       bucket[2] < 0 || bucket[2] > prior->nz) 
+        printf("Out of bounds access to volhist: %d %d %d\n", bucket[0], bucket[1], bucket[2]);
+}
 
-    int voxel_idx = Bx*prior->ny*prior->nz + By*prior->nz + Bz;
+// Address polynomial to convert a set of bucket indexes to a single index which
+// can be used to index vol_hist;
+static inline int bucket_to_index(struct Prior *prior, int *bucket) {
+    return bucket[0]*prior->ny*prior->nz + bucket[1]*prior->nz + bucket[2];
+}
 
-    if(voxel_idx < 0 || voxel_idx > prior->nx*prior->ny*prior->nz) {
-        printf("Out of bounds access to volhist: %d %d %d -> %d\n", Bx, By, Bz, voxel_idx);
-    }
+// Takes an index to volhist and returns 3 bucket indicies corresponding to that voxel
+static inline void index_to_bucket(struct Prior *prior, int index, /*OUT*/int *bucket){
+    bucket[0] = index/(prior->ny*prior->nz);
+    bucket[1] = index%(prior->ny*prior->nz) / prior->nz;
+    bucket[2] = index%(prior->ny*prior->nz) % prior->nz;
+}
 
+// Takes an index in volhist and returns the distance the center of that voxel 
+// is from earth
+static inline double index_to_r_ec(struct Prior *prior, int index) {
+    double location[3];
+    int bucket [3];
+    double phi, theta, r_ec;
+    index_to_bucket(prior, index, bucket);
+    bucket_to_location(prior, bucket, location);
+    galactocentric_to_sky_distance(location, &phi, &theta, &r_ec);
+
+    return r_ec;
+}
+
+static inline int location_to_index(struct Prior *prior, double* location) {
+    int bucket[3];
+    location_to_bucket(prior, location, bucket);
+    int voxel_idx = bucket_to_index(prior, bucket);
     return voxel_idx;
 }
 
 // Called by the galactic prior generator to sample the chain and generate the 3d volumetric galaxy prior
 static inline void sample_volume_prior(struct Prior *prior, double *chain_sample) {
     // Index, add one to the count
-    prior->volhist[lookup_volume_prior(prior, chain_sample)] += 1.0;
+    prior->volhist[location_to_index(prior, chain_sample)] += 1.0;
 }
 
 // Called as the last step in generation of the sky prior.
@@ -221,6 +254,43 @@ void convert_sky_prior(struct Prior *prior, int cnt) {
     }
 }
 
+// xcxc: Ought this be something more like a plummer potential
+//       to reduce support right on top of earth?
+//
+// We allocate additional probability to the volume prior in order to provide
+// support for sky locations outside the galaxy. Volume prior uses the below 
+// profile function to allocate this probability. 
+//
+// This function need not be normalized, and is parameterized in terms of r_ec
+// so it will be anisotropic over the sky (with the exception of any effects 
+// introduced by volume prior bounding box alignment)
+// 
+// At long distance this function should fall off at least as rapidly as 1/r^2 
+// to prevent the prior from biasing toward more distant sources.
+static inline double volume_prior_uniform_contribution(double r_ec){
+    // something more plummer-like
+    //double a = 0.5 //kpc
+    //return 1/(r_ec*r_ec + a*a);
+
+    // 1/r^2
+    return 1/(r_ec*r_ec);
+}
+
+// Calculate the triple integral of our uniform contribution function
+// added up across every box in the volume.
+double volume_prior_uniform_normalization(struct Prior *prior) {
+    
+    int num_buckets = prior->nx*prior->ny*prior->nz;
+    double integral = 0.0;
+
+    for(int i=0; i< num_buckets; i++) {
+        double r_ec = index_to_r_ec(prior, i);
+        integral += volume_prior_uniform_contribution(r_ec);
+    }
+
+    return 1/integral;
+}
+
 void convert_volume_prior(struct Prior *prior, int cnt) {
     int num_buckets = prior->nx*prior->ny*prior->nz;
 
@@ -234,14 +304,16 @@ void convert_volume_prior(struct Prior *prior, int cnt) {
     // contribution subtracted out.
     double count_normalization = (1.0 - uni)/(double)(cnt);
 
-    // Amount of the total unitary contribution each bucket gets
-    double uniform_contribution = uni/(double)(num_buckets);
+    // normalization for the uniform-over-sky-angle contribution
+    double uniform_normalization = uni * volume_prior_uniform_normalization(prior);
 
     // Both of these converted to units of probability / kpc^3
     count_normalization /= dVol;
-    uniform_contribution /= dVol;
+    uniform_normalization /= dVol;
 
     for(int i = 0; i < num_buckets; i++) {
+        double r_ec = index_to_r_ec(prior, i);
+        double uniform_contribution = uniform_normalization*volume_prior_uniform_contribution(r_ec);
         double mcmc_contribution = count_normalization*prior->volhist[i];
         prior->volhist[i] = log(uniform_contribution + mcmc_contribution);
         if(prior->volhist[i] > prior->volmaxp) prior->volmaxp = prior->volhist[i];
@@ -948,7 +1020,7 @@ double evaluate_volume_prior(struct Prior *prior, struct Source *source) {
     }
 
     // get the density from the voxel in use
-    logP = prior->volhist[lookup_volume_prior(prior, location)];
+    logP = prior->volhist[location_to_index(prior, location)];
 
     return logP;
 }
