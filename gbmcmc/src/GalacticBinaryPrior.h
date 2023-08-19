@@ -91,6 +91,7 @@ struct Prior
     double dx; //!< size of a bin in kpc x direction
     double dy; //!< size of a bin in kpc y direction
     double dz; //!< size of a bin in kpc z direction
+    bool fdotastroPrior; //!< True if fdot_astro has the (x^2+a^2)^-1 prior. False if it has the standard uniform prior.
     ///@}
     
     ///@name workspace
@@ -174,6 +175,13 @@ double evaluate_prior(struct Flags *flags, struct Data *data, struct Model *mode
  @returns \f$ \log p({\rm SNR})\f$
  */
 double evaluate_snr_prior(struct Data *data, struct Model *model, double *params);
+
+/**
+ \brief Computes prior DFDTASTRO parameter `params`
+ 
+ Uses 1/(dfdt^2 + a^2) profile. Returns log of the prior probability.
+ */
+double evaluate_dfdtastro_prior(struct Prior *prior, struct Data * data, struct Model* model, double *params);
 
 /**
  \brief Computes prior for sky location parameters \f$\vec\Omega\f$

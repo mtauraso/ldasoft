@@ -1032,6 +1032,9 @@ int main(int argc, char *argv[])
                 counter = 0;
             }
         }
+
+        // Give us a dot each time a gmm converges, so there is some notion of progress.
+        printf(".");
         
         gsl_rng_free(r);
     }//end loop over catalog entries

@@ -212,8 +212,13 @@ void print_run_settings(int argc, char **argv, struct Data *data, struct Orbit *
     else                fprintf(fptr,"  Noise simulation is.. DISABLED\n");
     if(flags->rj)       fprintf(fptr,"  RJMCMC is ........... ENABLED\n");
     else                fprintf(fptr,"  RJMCMC is ........... DISABLED\n");
-    if(flags->detached) fprintf(fptr,"  Mchirp prior is...... ENABLED\n");
+    if(flags->detached || flags->volumePrior) 
+                        fprintf(fptr,"  Mchirp prior is...... ENABLED\n");
     else                fprintf(fptr,"  Mchirp prior is...... DISABLED\n");
+    if(flags->fdotastroPrior)
+                        fprintf(fptr,"  Fdot Astro prior is.. NONUNIFORM\n");
+    else if (flags->volumePrior)
+                        fprintf(fptr,"  Fdot Astro prior is.. UNIFORM\n");
     fprintf(fptr,"\n");
     fprintf(fptr,"\n");
 }
@@ -353,6 +358,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
     flags->fixFdot     = 0;
     flags->galaxyPrior = 0;
     flags->volumePrior = 0;
+    flags->fdotastroPrior = 0;
     flags->fDoubleDot  = 0;
     flags->snrPrior    = 1;
     flags->emPrior     = 0;
@@ -460,7 +466,8 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
         {"fix-fdot",    no_argument, 0, 0 },
         {"galaxy-prior",no_argument, 0, 0 },
         {"volume-prior",no_argument, 0, 0 },
-        {"snr-prior",   no_argument, 0, 0 },
+        {"fdotastro-prior",no_argument,0,0},
+        {"no-snr-prior",no_argument, 0, 0 },
         {"known-source",no_argument, 0, 0 },
         {"f-double-dot",no_argument, 0, 0 },
         {"detached",    no_argument, 0, 0 },
@@ -513,6 +520,7 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
                 if(strcmp("update",      long_options[long_index].name) == 0) flags->update     = 1;
                 if(strcmp("galaxy-prior",long_options[long_index].name) == 0) flags->galaxyPrior= 1;
                 if(strcmp("volume-prior",long_options[long_index].name) == 0) flags->volumePrior= 1;
+                if(strcmp("fdotastro-prior",long_options[long_index].name) == 0) flags->fdotastroPrior= 1;
                 if(strcmp("no-snr-prior",long_options[long_index].name) == 0) flags->snrPrior   = 0;
                 if(strcmp("prior",       long_options[long_index].name) == 0) flags->prior      = 1;
                 if(strcmp("f-double-dot",long_options[long_index].name) == 0) flags->fDoubleDot = 1;
@@ -686,6 +694,12 @@ void parse(int argc, char **argv, struct Data *data, struct Orbit *orbit, struct
         fprintf(stderr, "Volumetric prior works by drawing a voxel for 3d location and a value for M_chirp.\n");
         fprintf(stderr, "Together these imply a gravitational wave amplitude, and therefore an SNR.\n");
         exit(1);
+    }
+
+    if(!flags->volumePrior && flags->fdotastroPrior) {
+        fprintf(stderr, "Warning: --fdotastro-prior requires --volume-prior to have any effect.\n");
+        fprintf(stderr, "Ignoring --fdotastro-prior\n");
+        flags->fdotastroPrior = 0;
     }
 
     setup_mcmc_param_layout(flags);
@@ -1174,6 +1188,8 @@ void print_source_params(struct Data *data, struct Source *source, FILE *fptr)
         fprintf(fptr,"%.12g ",source->Mc);
     if(is_param(DIST))
         fprintf(fptr,"%.12g ",source->D);
+    if(is_param(DFDTASTRO))
+        fprintf(fptr,"%.12g ",source->dfdtastro);
     if(is_param(D2FDT2))
         fprintf(fptr,"%.12g ",source->d2fdt2);
 }
@@ -1199,12 +1215,15 @@ int safe_scan_source_params(struct Data *data, struct Source *source, FILE *fptr
         check+=fscanf(fptr,"%lg",&source->Mc);
     if(is_param(DIST))
         check+=fscanf(fptr,"%lg",&source->D);
+    if(is_param(DFDTASTRO))
+        check+=fscanf(fptr,"%lg",&source->dfdtastro);
     if(is_param(D2FDT2))
         check+=fscanf(fptr,"%lg",&source->d2fdt2);
     
     // We have a problem if we did not read every parameter in use 
     // (plus amplitude if amplitude is not in use)
-    if(check != NUM_PARAMS + ((int) !is_param(AMP)) )
+    // (plus dfdtastro if dfdtastro is in use)
+    if(check != NUM_PARAMS + ((int) !is_param(AMP)) + ((int) is_param(DFDTASTRO)) )
         return 1;
     
     //map to parameter names (just to make code readable)

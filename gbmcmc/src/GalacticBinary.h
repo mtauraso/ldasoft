@@ -173,6 +173,7 @@ struct Flags
     int galaxyPrior;//!<`[--galaxy-prior; default=FALSE]`: use model of galaxy for sky location prior. Incompatible with --volume-prior.
     int fDoubleDot; //!<`[--f-double-dot; default=FALSE]`: model f double dot as an MCMC parameter.
     int volumePrior;//!<`[--volume-prior; default=FALSE]`: use 3d volumetric model of galaxy for sky location and distance prior. Incompatible with --galaxy-prior.
+    int fdotastroPrior;//!<`[--fdotastro-prior; default=False]`: use a peaked (x^2+a^2)^-1 profile about zero for fdot_astro. Only valid when --volume-prior is specified
     int snrPrior;   //!<`[--snr-prior; default=FALSE]`: use SNR prior for amplitude
     int emPrior;    //!<`[--em-prior=FILENAME]`: use input data file with EM-derived parameters for priors.
     int knownSource;//!<`[--known-source; default=FALSE]`: injection is known binary, will need polarization and phase to be internally generated. Sets Flags::fixSky = `TRUE`.

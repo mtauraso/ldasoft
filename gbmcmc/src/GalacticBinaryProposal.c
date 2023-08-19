@@ -342,10 +342,28 @@ double draw_from_prior(struct Data *data, struct Model *model, struct Source *so
 }
 #endif
 
-static inline double draw_uniform_parameter(int index, double min, double max, double logPriorVolume, double *params, gsl_rng *seed)
+static inline double draw_uniform_parameter(int index, struct Model *model, double *params, gsl_rng *seed)
 {
+    double min = model->prior[index][0];
+    double max = model->prior[index][1];
+
     params[index] = min + gsl_rng_uniform(seed) * (max - min);
-    return logPriorVolume;
+
+    return model->logPriorVolume[index];
+}
+
+// Draw uniform
+// Use prior to determine proposal probability for rjmcmc. 
+static inline double draw_dfdtastro(struct Proposal *proposal, struct Data* data, struct Model * model, double *params, gsl_rng *seed) {
+
+    // Pick a random number between the min and max of the fdot astro prior
+    // we pass a log prior volume of 0.0 because we will compute that below.
+    draw_uniform_parameter(DFDTASTRO, model, params, seed);
+
+    struct Prior prior;
+    unpack_prior_proposal(proposal, &prior);
+
+    return evaluate_dfdtastro_prior(&prior, data, model, params);
 }
 
 // Does the draw from the volume prior and returns the probability associated with that draw.
@@ -375,15 +393,17 @@ double draw_from_uniform_prior(struct Data *data, struct Model *model, struct So
 
     //frequency, sky location, amplitude(skipped), inclination, polarization, phase, fdot (and fdouble-dot)
     for(int n=0; n < source->NP; n++) {
-        // For volume prior sky location and distance are drawn differently.
-        if(is_param(DIST) && (n == COSTHETA || n == PHI || n == DIST)) continue;
+        // For volume prior sky location and distance are drawn differently, 
+        // and dfdtastro is not a uniform parameter.
+        if(is_param(DIST) && (n==COSTHETA || n==PHI || n==DIST || n==DFDTASTRO)) continue;
         // Amplitude is always drawn based on SNR prior
-        if(is_param(AMP) && (n == AMP)) continue; 
-        logQ -= draw_uniform_parameter(n, model->prior[n][0], model->prior[n][1], model->logPriorVolume[n], params, seed);
+        if(is_param(AMP) && (n==AMP)) continue; 
+        logQ -= draw_uniform_parameter(n, model, params, seed);
     }
 
     if(is_param(DIST)) {
         logQ -= draw_from_volume_prior_uniform(data, model, source, params, seed);
+        logQ += draw_dfdtastro(proposal, data, model, params, seed);
     } else {
         logQ += draw_signal_amplitude(data, model, source, proposal, params, seed);
     }
@@ -402,7 +422,7 @@ double draw_from_extrinsic_prior(UNUSED struct Data *data, struct Model *model, 
         if(n == DFDT || n == DFDTASTRO) continue; // skip f-dot
         if(n == D2FDT2) continue; // skip f-dot and f-double-dot
 
-        logP -= draw_uniform_parameter(n, model->prior[n][0], model->prior[n][1], model->logPriorVolume[n], params, seed);
+        logP -= draw_uniform_parameter(n, model, params, seed);
     }
 
     return logP;
@@ -1411,7 +1431,7 @@ void setup_prior_proposal(struct Flags *flags, struct Prior *prior, struct Propo
     }
 
     if (priorMode == volumePrior) {
-        proposal->matrix       = malloc(3*sizeof(double*));
+        proposal->matrix       = malloc(4*sizeof(double*));
 
         proposal->matrix[0]    = calloc(3,sizeof(double));
         proposal->matrix[0][0] = prior->dx;
@@ -1425,6 +1445,11 @@ void setup_prior_proposal(struct Flags *flags, struct Prior *prior, struct Propo
         proposal->matrix[1][2] = prior->nz;
 
         proposal->matrix[2]    = prior->volhist;
+
+        // Needed to keep state on whether we are 
+        // using the nonuniform fdotastro prior.
+        proposal->matrix[3]    = calloc(1, sizeof(double));
+        proposal->matrix[3][0] = prior->fdotastroPrior;
     }
 }
 
@@ -1463,6 +1488,8 @@ enum SkyPriorMode unpack_prior_proposal(struct Proposal *proposal, struct Prior 
         prior->nz = (int) proposal->matrix[1][2];
 
         prior->volhist = proposal->matrix[2];
+
+        prior->fdotastroPrior = (bool) proposal->matrix[3][0];
     }
 
     return priorMode;
@@ -1908,6 +1935,7 @@ double prior_density(struct Data *data, struct Model *model, struct Source *sour
         // Branch here because volume prior alters our amplitude calculation
         // Amplitude was actually calculated from a draw of M_chirp and XYZ, not in the normal fashion.
         logP += evaluate_volume_prior(&prior, source);
+        logP += evaluate_dfdtastro_prior(&prior, data, model, params);
     } else {
         //sky location prior
         logP += evaluate_sky_location_prior(params, uniform_prior, model->logPriorVolume, galaxyPriorMode , prior.skyhist, prior.dcostheta, prior.dphi, prior.nphi);

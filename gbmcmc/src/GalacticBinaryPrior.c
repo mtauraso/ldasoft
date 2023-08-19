@@ -122,7 +122,7 @@ static inline void alloc_sky_prior(struct Prior * prior, int Nth, int Nph) {
     }
 }
 
-static inline void alloc_volume_prior(struct Prior * prior, int Nx, int Ny, int Nz){
+static inline void alloc_volume_prior(struct Prior * prior, struct Flags *flags, int Nx, int Ny, int Nz){
     prior->volhist = (double *)calloc((Nx*Ny*Nz), sizeof(double));
 
     prior->nx = Nx;
@@ -132,6 +132,8 @@ static inline void alloc_volume_prior(struct Prior * prior, int Nx, int Ny, int 
     prior->dx = GALAXY_BB_X/Nx;
     prior->dy = GALAXY_BB_Y/Ny;
     prior->dz = GALAXY_BB_Z/Nz;
+
+    prior->fdotastroPrior = flags->fdotastroPrior;
 }
 
 // Called by galactic prior generator mcmc to sample the chain to generate the sky prior
@@ -410,7 +412,7 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     
     if(flags->galaxyPrior) alloc_sky_prior(prior, Nth, Nph);
     if(flags->volumePrior) {
-        alloc_volume_prior(prior, 200, 200, 200);
+        alloc_volume_prior(prior, flags, 200, 200, 200);
         if(!flags->quiet) {
             fprintf(stdout,"   Voxel size      = %g x %g x %g kpc\n", prior->dx, prior->dy, prior->dz);
         }
@@ -469,6 +471,61 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     if(!flags->quiet)fprintf(stdout,"\n================================================\n\n");
     fflush(stdout);
     
+}
+
+// This arose from a curve examination of the fdot_astro of
+// interacting LDC injected sources 
+// Some educated guesses were made about M_c
+//
+// The calculations showing 1/(x^2 + a^2) is a reasonable profile
+// across a few choices of M_c are shown in scripts/fdot_prior.ipynb
+//
+# define DFDTASTRO_A (8e-21) // Hz^2
+
+// singleton to store the norm.
+// There's not a great place to put this given its dependent on 
+// the limits on dfdt stored in model->prior, but thematically is best
+// put into struct Prior.
+static double DFDT_ASTRO_PRIOR_NORM = NAN;
+
+static inline double dfdtastro_prior_norm(struct Data * data, struct Model *model) {
+    assert(is_param(DFDTASTRO));
+
+    // if its not Nan, we already ran once and set it.
+    if(DFDT_ASTRO_PRIOR_NORM == DFDT_ASTRO_PRIOR_NORM) {
+        return DFDT_ASTRO_PRIOR_NORM;
+    }
+
+    // convert a to data dependent frequency units
+    double a = DFDTASTRO_A*data->T*data->T;
+
+    double fdotastromin = model->prior[DFDTASTRO][0];
+    double fdotastromax = model->prior[DFDTASTRO][1];
+
+    // This is the log of total volume under the curve
+    // (x^2 + a^2)^-1 between fdotastromin and fdotastromax
+    // in the same units as params.
+    //
+    // log{ a^-1 * (atan(fdotmax/a) - atan(fdotastromin/a)) }
+    DFDT_ASTRO_PRIOR_NORM = -log(a) + log(atan(fdotastromax/a) - atan(fdotastromin/a));
+
+    return DFDT_ASTRO_PRIOR_NORM;
+}
+
+double evaluate_dfdtastro_prior(struct Prior *prior, struct Data * data, struct Model* model, double *params) {
+    assert(is_param(DFDTASTRO));
+
+    if(prior->fdotastroPrior) {
+        double a = DFDTASTRO_A*data->T*data->T; // convert a to params units
+
+        double a_sq = a*a;
+        double dfdt_sq = params[DFDTASTRO]*params[DFDTASTRO];
+
+        // log{ (total_area)^-1 * (dfdt^2 + a^2)^-1 }
+        return - dfdtastro_prior_norm(data, model) - log(dfdt_sq + a_sq);
+    } else {
+        return -model->logPriorVolume[DFDTASTRO];
+    }
 }
 
 void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *data, int verbose)
@@ -561,10 +618,17 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     double fdotgrmin = galactic_binary_fdot(Mcmin, fmin);
     double fdotgrmax = galactic_binary_fdot(Mcmax, fmax); 
     
-    // Ensure our prior on fdotastro allows you to hit the full range of values
+    // Ensure our prior on fdotastro allows any mc parameter to hit the full 
+    // range of [fdotmin, fdotmax]. This the least constraining version of the
+    // fdot astro prior
     // when calculating fdot = fdot_gr + fdot_astro
-    double fdotastromin = fdotmin - fdotgrmax;
-    double fdotastromax = fdotmax - fdotgrmin;
+    //double fdotastromin = fdotmin - fdotgrmax;
+    //double fdotastromax = fdotmax - fdotgrmin;
+
+    //Ensure our prior on fdotastro has support only in a narrow range around zero
+    // that still allows fdotmin and fdotmax to be hit at parameter extremes of mc
+    double fdotastromin = fdotmin - fdotgrmin;
+    double fdotastromax = fdotmax - fdotgrmax;
     
     
     if(flags->detached)
@@ -588,19 +652,21 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
         if(flags->detached)fprintf(stdout,"  Assuming detached binary, Mchirp = [0.15,1]\n");
         
         if(is_param(DFDT))
-        fprintf(stdout,"  p(fdot)  = U[%g,%g]\n",fdotmin,fdotmax);
+        fprintf(stdout,"  p(fdot)      = U[%g,%g]\n",fdotmin,fdotmax);
 
-        if(is_param(DFDTASTRO))
-        fprintf(stdout,"  p(fdot)  = U[%g,%g]\n",fdotastromin,fdotastromax);
+        if(is_param(DFDTASTRO) && flags->fdotastroPrior)
+        fprintf(stdout,"  p(fdotastro) = Plummer[%g,%g,%g]\n",fdotastromin,fdotastromax,DFDTASTRO_A*data->T*data->T);
+        else if(is_param(DFDTASTRO))
+        fprintf(stdout,"  p(fdotastro) = U[%g,%g]\n",fdotastromin,fdotastromax);
         
         if(is_param(D2FDT2))
-        fprintf(stdout,"  p(fddot) = U[%g,%g]\n",fddotmin,fddotmax);
+        fprintf(stdout,"  p(fddot)     = U[%g,%g]\n",fddotmin,fddotmax);
 
         if(is_param(AMP)) 
-        fprintf(stdout,"  p(lnA)   = U[%g,%g]\n",model->prior[AMP][0],model->prior[AMP][1]);
+        fprintf(stdout,"  p(lnA)        = U[%g,%g]\n",model->prior[AMP][0],model->prior[AMP][1]);
 
         if(is_param(MC)) 
-        fprintf(stdout,"  p(Mc)    = U[%g,%g]\n",model->prior[MC][0],model->prior[MC][1]);
+        fprintf(stdout,"  p(Mc)         = U[%g,%g]\n",model->prior[MC][0],model->prior[MC][1]);
         fprintf(stdout,"====================================\n\n");
     }
     
@@ -770,7 +836,6 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     //set prior volume
     for(int n=0; n<data->NP; n++) {
         // Prior volume for distance is handled in draw_from_galaxy_prior.
-        // xcxc check function name is correct  here ^^
         if(n == DIST) model->logPriorVolume[n] = 0.0;
         else model->logPriorVolume[n] = log(model->prior[n][1]-model->prior[n][0]);
     }
@@ -948,6 +1013,7 @@ double evaluate_prior(struct Flags *flags, struct Data *data, struct Model *mode
         if(flags->volumePrior) {
             // Sky location and amplitude handled together
             logP += evaluate_volume_prior(prior, source);
+            logP += evaluate_dfdtastro_prior(prior, data, model, params);
         } else {
             //sky location prior
             logP += evaluate_sky_location_prior(params, uniform_prior, model->logPriorVolume, flags->galaxyPrior, prior->skyhist, prior->dcostheta, prior->dphi, prior->nphi);
@@ -991,7 +1057,6 @@ double evaluate_uniform_priors(double *params, double **uniform_prior, double *l
     
     //fdot (bins/Tobs)
     if(is_param(DFDT)) logP -= logPriorVolume[DFDT];
-    if(is_param(DFDTASTRO)) logP -= logPriorVolume[DFDTASTRO];
     
     //fddot
     if(is_param(D2FDT2)) logP -= logPriorVolume[D2FDT2];
