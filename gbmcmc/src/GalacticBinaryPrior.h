@@ -83,6 +83,9 @@ struct Prior
 
     ///@name 3D galaxy prior
     ///@{
+
+    // xcxc remove dead code
+    #if 0 
     double * volhist; //!< 3D histogram of prior density in galactocentric coordinates (x,y,z)
     double volmaxp; //!< Max prior density of volhist
     int nx; //!< number of bins in x
@@ -91,7 +94,14 @@ struct Prior
     double dx; //!< size of a bin in kpc x direction
     double dy; //!< size of a bin in kpc y direction
     double dz; //!< size of a bin in kpc z direction
+    #endif
+
     bool fdotastroPrior; //!< True if fdot_astro has the (x^2+a^2)^-1 prior. False if it has the standard uniform prior.
+
+    double *spherehist; //!< histogram of prior density in geocentric ecliptic coordinates (r,costheta,phi)
+    double spheremaxp;   //!< Maximum prior density of spherehist
+    double dr; //!<size of spherehist bins in radial direcction (kpc)
+    int nr;    //!<number of spherehist bins in radial direction
     ///@}
     
     ///@name workspace

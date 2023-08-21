@@ -595,6 +595,9 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
     if(params[COSTHETA] >= 1.) params[COSTHETA] = source->params[COSTHETA] - jump[COSTHETA];
     //cosine inclination
     if(params[COSI] >= 1.) params[COSI] = source->params[COSI] - jump[COSI];
+
+    //safety check for distance
+    if(is_param(DIST) && params[DIST] < 0.0) params[DIST] = source->params[DIST] - jump[DIST];
     
     for(int j=0; j<NP; j++)
     {
@@ -1434,17 +1437,17 @@ void setup_prior_proposal(struct Flags *flags, struct Prior *prior, struct Propo
         proposal->matrix       = malloc(4*sizeof(double*));
 
         proposal->matrix[0]    = calloc(3,sizeof(double));
-        proposal->matrix[0][0] = prior->dx;
-        proposal->matrix[0][1] = prior->dy;
-        proposal->matrix[0][2] = prior->dz;
+        proposal->matrix[0][0] = prior->dcostheta;
+        proposal->matrix[0][1] = prior->dphi;
+        proposal->matrix[0][2] = prior->dr;
 
         // Needed for addressing volhist and bounds checking
         proposal->matrix[1]    = calloc(3,sizeof(double));
-        proposal->matrix[1][0] = prior->nx;
-        proposal->matrix[1][1] = prior->ny;
-        proposal->matrix[1][2] = prior->nz;
+        proposal->matrix[1][0] = prior->ncostheta;
+        proposal->matrix[1][1] = prior->nphi;
+        proposal->matrix[1][2] = prior->nr;
 
-        proposal->matrix[2]    = prior->volhist;
+        proposal->matrix[2]    = prior->spherehist;
 
         // Needed to keep state on whether we are 
         // using the nonuniform fdotastro prior.
@@ -1479,15 +1482,15 @@ enum SkyPriorMode unpack_prior_proposal(struct Proposal *proposal, struct Prior 
 
     if(priorMode == volumePrior)
     {
-        prior->dx = proposal->matrix[0][0];
-        prior->dy = proposal->matrix[0][1];
-        prior->dz = proposal->matrix[0][2];
+        prior->dcostheta = proposal->matrix[0][0];
+        prior->dphi = proposal->matrix[0][1];
+        prior->dr = proposal->matrix[0][2];
 
-        prior->nx = (int) proposal->matrix[1][0];
-        prior->ny = (int) proposal->matrix[1][1];
-        prior->nz = (int) proposal->matrix[1][2];
+        prior->ncostheta = (int) proposal->matrix[1][0];
+        prior->nphi = (int) proposal->matrix[1][1];
+        prior->nr = (int) proposal->matrix[1][2];
 
-        prior->volhist = proposal->matrix[2];
+        prior->spherehist = proposal->matrix[2];
 
         prior->fdotastroPrior = (bool) proposal->matrix[3][0];
     }

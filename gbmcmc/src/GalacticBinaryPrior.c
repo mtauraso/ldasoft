@@ -98,129 +98,107 @@ struct Prior * alloc_prior() {
     return calloc(1, sizeof(struct Prior));
 }
 
-static inline void alloc_sky_prior(struct Prior * prior, int Nth, int Nph) {
-    int ith, iph;
-    
-    prior->skyhist = (double*)calloc((Nth*Nph),sizeof(double));
-    
+static inline void calc_sky_buckets(struct Prior *prior, int Nth, int Nph) {
     prior->dcostheta = 2./(double)Nth;
     prior->dphi      = 2.*M_PI/(double)Nph;
     
     prior->ncostheta = Nth;
     prior->nphi      = Nph;
-    
-    prior->skymaxp = 0.0;
-
-    // TODO: using calloc above  these loops should be unnecessary
-    // IEEE-754 floating points have all zeros mapped to +0.0
-    for(ith=0; ith< Nth; ith++)
-    {
-        for(iph=0; iph< Nph; iph++)
-        {
-            prior->skyhist[ith*Nph+iph] = 0.0;
-        }
-    }
 }
 
-static inline void alloc_volume_prior(struct Prior * prior, struct Flags *flags, int Nx, int Ny, int Nz){
-    prior->volhist = (double *)calloc((Nx*Ny*Nz), sizeof(double));
+static inline void alloc_sky_prior(struct Prior * prior, int Nth, int Nph) {
+    // Note that calloc's practice of setting memory to 0
+    // also sets IEEE-754 double precision floating point values to +0.0
+    prior->skyhist = (double*)calloc((Nth*Nph),sizeof(double));
+    calc_sky_buckets(prior, Nth, Nph);
+    prior->skymaxp = 0.0;
+}
 
-    prior->nx = Nx;
-    prior->ny = Ny;
-    prior->nz = Nz;
+static inline void alloc_volume_prior(struct Prior *prior, struct Flags *flags, int Nth, int Nph, int Nr) {
+    prior->spherehist = (double*)calloc((Nth*Nph*Nr), sizeof(double));
+    prior->spheremaxp = 0.0;
 
-    prior->dx = GALAXY_BB_X/Nx;
-    prior->dy = GALAXY_BB_Y/Ny;
-    prior->dz = GALAXY_BB_Z/Nz;
+    calc_sky_buckets(prior, Nth, Nph);
+    prior->nr = Nr;
+    prior->dr = (GALAXY_BB_X)/Nr;
 
     prior->fdotastroPrior = flags->fdotastroPrior;
+}
+
+// Takes in a sky direciton (costheta, phi) returns the corresponding indicies for costheta and phi 
+// suitable for either the sky prior or the volume prior.
+static inline void sky_direction_to_sky_bucket(struct Prior *prior, double costheta, double phi, int *ith, int *iph) {
+    int Nth = prior->ncostheta;
+    int Nph = prior->nphi;
+    *ith = (int)(0.5*(1.0+costheta)*(double)(Nth));
+    *iph = (int)((2*M_PI-phi)/(2.0*M_PI)*(double)(Nph));
+    
+    // Error checking
+    if(*ith < 0 || *ith > Nth -1) printf("Out of bounds in Theta direction: %d %d\n", *ith, *iph);
+    if(*iph < 0 || *iph > Nph -1) printf("Out of bounds in Phi direction: %d %d\n", *ith, *iph);
+}
+
+// Takes sky-distance representation (as it is in params) and returns
+// the single index in the spherical volume bucket corresponding to that point
+static inline int sky_distance_to_sphere_index(struct Prior *prior, double costheta, double phi, double r_ec) {
+    int Nph = prior->nphi;
+    int Nr = prior->nr;
+
+    int ith, iph, ir;
+    sky_direction_to_sky_bucket(prior, costheta, phi, &ith, &iph);
+    ir = (int)(r_ec/prior->dr);
+
+    if(ir < 0 || ir > Nr -1) {
+        printf("Out of bounds in R direction: %d %d %d\n", ith, iph, ir);
+    }
+
+    return ith*(Nph*Nr) + iph*(Nr) + ir;
 }
 
 // Called by galactic prior generator mcmc to sample the chain to generate the sky prior
 static inline void sample_sky_prior(struct Prior *prior, double *chain_sample)
 {
-    double *x = chain_sample;
-    double r_ec, theta, phi;
     int ith, iph;
-    int Nth = prior->ncostheta;
+    double phi, theta, r_ec;
     int Nph = prior->nphi;
 
-    /* Translate and rotate from galactocentrix xyz to phi, theta, and r_ec sky position*/
-    galactocentric_to_sky_distance(x, &phi, &theta, &r_ec);
-            
-    //      if(mc%1000 == 0 && flags->verbose) fprintf(chain,"%d %e %e %e %e %e %e %e\n", mc/1000, logLx, x[0], x[1], x[2], theta, phi, r_ec);
-    
-    ith = (int)(0.5*(1.0+sin(theta))*(double)(Nth));
-    //iph = (int)(phi/(2.0*M_PI)*(double)(Nph));
-    //ith = (int)(0.5*(1.0-sin(theta))*(double)(Nth));
-    iph = (int)((2*M_PI-phi)/(2.0*M_PI)*(double)(Nph));
-    
-    //ith = (int)floor(Nth*gsl_rng_uniform(r));
-    //iph = (int)floor(Nph*gsl_rng_uniform(r));
-    
-    // Error checking
-    if(ith < 0 || ith > Nth -1) printf("Out of bounds in Theta direction: %d %d\n", ith, iph);
-    if(iph < 0 || iph > Nph -1) printf("Out of bounds in Phi direction: %d %d\n", ith, iph);
-    
+    galactocentric_to_sky_distance(chain_sample, &phi, &theta, &r_ec);
+
+    // sin(theta) here because the "theta" returned by galactocentric_to_sky_distance is 
+    // an elevation angle measured from the celestial equator with range [-pi/2, pi/2]
+    // This function expects a coordinate which is cos("theta" + pi/2) with the range [-1,1]
+    // as is typical of params, e.g. The cosine of an angle measured positively from the north pole
+    sky_direction_to_sky_bucket(prior, sin(theta), phi, &ith, &iph);
+
     prior->skyhist[ith*Nph+iph] += 1.0;
-}
-
-static inline void bucket_to_location(struct Prior *prior, int *bucket, /*OUT*/ double *location) {
-    // Convert a set of bucket indexes to galactocentric x,y,z coordinates in kpc of the center of that bucket
-    location[0] = bucket[0]*prior->dx - GALAXY_BB_X*0.5 + prior->dx*0.5;
-    location[1] = bucket[1]*prior->dy - GALAXY_BB_Y*0.5 + prior->dy*0.5;
-    location[2] = bucket[2]*prior->dz - GALAXY_BB_Z*0.5 + prior->dz*0.5;
-}
-
-static inline void location_to_bucket(struct Prior *prior, double *location, /*OUT*/ int *bucket ) {
-    // Convert a galactocentric location (x,y,z) in kpc to the bucket that point is in
-    bucket[0] = (int)((location[0] + GALAXY_BB_X*0.5) / (prior->dx));
-    bucket[1] = (int)((location[1] + GALAXY_BB_Y*0.5) / (prior->dy));
-    bucket[2] = (int)((location[2] + GALAXY_BB_Z*0.5) / (prior->dz));
-    
-    if(bucket[0] < 0 || bucket[0] > prior->nx || 
-       bucket[1] < 0 || bucket[1] > prior->ny ||
-       bucket[2] < 0 || bucket[2] > prior->nz) 
-        printf("Out of bounds access to volhist: %d %d %d\n", bucket[0], bucket[1], bucket[2]);
-}
-
-// Address polynomial to convert a set of bucket indexes to a single index which
-// can be used to index vol_hist;
-static inline int bucket_to_index(struct Prior *prior, int *bucket) {
-    return bucket[0]*prior->ny*prior->nz + bucket[1]*prior->nz + bucket[2];
-}
-
-// Takes an index to volhist and returns 3 bucket indicies corresponding to that voxel
-static inline void index_to_bucket(struct Prior *prior, int index, /*OUT*/int *bucket){
-    bucket[0] = index/(prior->ny*prior->nz);
-    bucket[1] = index%(prior->ny*prior->nz) / prior->nz;
-    bucket[2] = index%(prior->ny*prior->nz) % prior->nz;
-}
-
-// Takes an index in volhist and returns the distance the center of that voxel 
-// is from earth
-static inline double index_to_r_ec(struct Prior *prior, int index) {
-    double location[3];
-    int bucket [3];
-    double phi, theta, r_ec;
-    index_to_bucket(prior, index, bucket);
-    bucket_to_location(prior, bucket, location);
-    galactocentric_to_sky_distance(location, &phi, &theta, &r_ec);
-
-    return r_ec;
-}
-
-static inline int location_to_index(struct Prior *prior, double* location) {
-    int bucket[3];
-    location_to_bucket(prior, location, bucket);
-    int voxel_idx = bucket_to_index(prior, bucket);
-    return voxel_idx;
 }
 
 // Called by the galactic prior generator to sample the chain and generate the 3d volumetric galaxy prior
 static inline void sample_volume_prior(struct Prior *prior, double *chain_sample) {
+    double phi, theta, r_ec;
+    galactocentric_to_sky_distance(chain_sample, &phi, &theta, &r_ec);
+    
+    // sin(theta) here because the "theta" returned by galactocentric_to_sky_distance is 
+    // an elevation angle measured from the celestial equator with range [-pi/2, pi/2]
+    // This function expects a coordinate which is cos("theta" + pi/2) with the range [-1,1]
+    // as is typical of params, e.g. The cosine of an angle measured positively from the north pole
+    int i = sky_distance_to_sphere_index(prior, sin(theta), phi, r_ec);
+
     // Index, add one to the count
-    prior->volhist[location_to_index(prior, chain_sample)] += 1.0;
+    prior->spherehist[i] += 1.0;
+}
+
+static inline void sphere_index_to_coords(struct Prior *prior, int index, double *costheta, double *phi, double *r_ec ) {
+
+    // Convert our single index into indicies along costheta, phi, r directions of our 3d array.
+    int costheta_idx = (index / (prior->nphi*prior->nr));
+    int phi_idx = ((index % (prior->nphi*prior->nr))/ prior->nr);
+    int r_idx = (index % (prior->nphi*prior->nr))% prior->nr;
+
+    // add 0.5 to each idx before converting to get the center of each dV region
+    *costheta = ((costheta_idx+0.5)*prior->dcostheta) - 1.0;
+    *phi =      ((phi_idx+0.5)*prior->dphi);
+    *r_ec =     ((r_idx+0.5)*prior->dr);
 }
 
 // Called as the last step in generation of the sky prior.
@@ -282,22 +260,21 @@ static inline double volume_prior_uniform_contribution(double r_ec){
 // added up across every box in the volume.
 double volume_prior_uniform_normalization(struct Prior *prior) {
     
-    int num_buckets = prior->nx*prior->ny*prior->nz;
+    int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
     double integral = 0.0;
 
     for(int i=0; i< num_buckets; i++) {
-        double r_ec = index_to_r_ec(prior, i);
-        integral += volume_prior_uniform_contribution(r_ec);
+        double phi, costheta, r_ec;
+        sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
+        double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
+        integral += volume_prior_uniform_contribution(r_ec) * dVol;
     }
 
     return 1/integral;
 }
 
 void convert_volume_prior(struct Prior *prior, int cnt) {
-    int num_buckets = prior->nx*prior->ny*prior->nz;
-
-    // volume of a bucket in kpc^3
-    double dVol = (GALAXY_BB_X*GALAXY_BB_Y*GALAXY_BB_Z)/(double)(num_buckets);
+    int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
 
     // Amount of total probabilty to redistribute uniformly across volume
     double uni = 0.1;
@@ -309,16 +286,15 @@ void convert_volume_prior(struct Prior *prior, int cnt) {
     // normalization for the uniform-over-sky-angle contribution
     double uniform_normalization = uni * volume_prior_uniform_normalization(prior);
 
-    // Both of these converted to units of probability / kpc^3
-    count_normalization /= dVol;
-    uniform_normalization /= dVol;
-
     for(int i = 0; i < num_buckets; i++) {
-        double r_ec = index_to_r_ec(prior, i);
-        double uniform_contribution = uniform_normalization*volume_prior_uniform_contribution(r_ec);
-        double mcmc_contribution = count_normalization*prior->volhist[i];
-        prior->volhist[i] = log(uniform_contribution + mcmc_contribution);
-        if(prior->volhist[i] > prior->volmaxp) prior->volmaxp = prior->volhist[i];
+        double phi, costheta, r_ec;
+        sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
+        double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
+        double uniform_contribution = uniform_normalization*volume_prior_uniform_contribution(r_ec)/dVol;
+        double mcmc_contribution = count_normalization*prior->spherehist[i]/dVol;
+
+        prior->spherehist[i] = log(uniform_contribution + mcmc_contribution);
+        if(prior->spherehist[i] > prior->spheremaxp) prior->spheremaxp = prior->spherehist[i];
     }
 }
 
@@ -345,22 +321,16 @@ void dump_sky_prior(struct Prior *prior)
     fclose(fptr);
 }
 
-void dump_volume_prior(struct Prior * prior) 
+void dump_volume_prior(struct Prior *prior)
 {
-    int i, j, k;
-    double xx, yy, zz;
-    int voxel_index = 0;
-    FILE *fptr = fopen("3dgalaxyprior.dat", "w");
-    for(i=0; i < prior->nx; i++) {
-        xx = i*prior->dx - GALAXY_BB_X*0.5 + prior->dx*0.5;
-        for(j=0; j < prior->ny; j++) {
-            yy = j*prior->dy - GALAXY_BB_Y*0.5 + prior->dy*0.5;
-            for(k=0; k < prior->nz; k++) {
-                zz = k*prior->dz - GALAXY_BB_Z*0.5 + prior->dz*0.5;
-                fprintf(fptr, "%e %e %e %e\n", xx, yy, zz, prior->volhist[voxel_index]);
-                voxel_index +=1;
-            }
-        }
+    int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
+    FILE *fptr = fopen("3dsphereprior.dat", "w");
+    fprintf(fptr, "# costheta phi r_ec log_density \n");
+
+    for(int i = 0; i < num_buckets; i++) {
+        double phi, costheta, r_ec;
+        sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
+        fprintf(fptr, "%e %e %e %e\n", costheta, phi, r_ec, prior->spherehist[i]);
     }
     fclose(fptr);
 }
@@ -384,6 +354,7 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     int D = 3;  // number of parameters
     int Nth = 200;  // bins in cos theta
     int Nph = 200;  // bins in phi
+    int Nr = 200;  // bins in r_ec (if applicable)
     int MCMC=100000000;
     int j;
     int cnt;
@@ -411,12 +382,7 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     y =  (double*)calloc(D,sizeof(double));
     
     if(flags->galaxyPrior) alloc_sky_prior(prior, Nth, Nph);
-    if(flags->volumePrior) {
-        alloc_volume_prior(prior, flags, 200, 200, 200);
-        if(!flags->quiet) {
-            fprintf(stdout,"   Voxel size      = %g x %g x %g kpc\n", prior->dx, prior->dy, prior->dz);
-        }
-    }
+    if(flags->volumePrior) alloc_volume_prior(prior, flags, Nth, Nph, Nr);
     
     // starting values for parameters
     x[0] = 0.5;
@@ -933,7 +899,7 @@ void set_gmm_prior(struct Flags *flags, struct Data *data, struct Prior *prior)
 
 void free_prior(struct Prior *prior) {
     if(prior->skyhist) free(prior->skyhist);
-    if(prior->volhist) free(prior->volhist);
+    if(prior->spherehist) free(prior->spherehist);
     if(prior->gmm) {
         for(size_t n=0; n<prior->gmm->NMODE; n++) free_MVG(prior->gmm->modes[n]);
         free(prior->gmm->modes);
@@ -1069,25 +1035,9 @@ double evaluate_uniform_priors(double *params, double **uniform_prior, double *l
 
 // Returns the log probability density at the location we drew
 double evaluate_volume_prior(struct Prior *prior, struct Source *source) {
-    double logP;
-    double location[3];
-    double * params = source->params;
-
-    sky_distance_to_galactocentric(location, params[PHI], params[COSTHETA], params[DIST]);
-
-    // TODO: Find something better to do with this case
-    // If the source is outside the glactic bounding box simply ignore it
-    if(location[0] < -GALAXY_BB_X*0.5 || location[0] > GALAXY_BB_X*0.5 ||
-       location[1] < -GALAXY_BB_Y*0.5 || location[1] > GALAXY_BB_Y*0.5 ||
-       location[2] < -GALAXY_BB_Z*0.5 || location[2] > GALAXY_BB_Z*0.5) {
-
-        return -INFINITY;
-    }
-
-    // get the density from the voxel in use
-    logP = prior->volhist[location_to_index(prior, location)];
-
-    return logP;
+    double *params = source->params;
+    int index = sky_distance_to_sphere_index(prior, params[COSTHETA], params[PHI], params[DIST]);
+    return prior->spherehist[index];
 }
 
 double evaluate_sky_location_prior(double *params, double **uniform_prior, double *logPriorVolume, enum SkyPriorMode galaxyFlag, double *skyhist, double dcostheta, double dphi, int nphi)
