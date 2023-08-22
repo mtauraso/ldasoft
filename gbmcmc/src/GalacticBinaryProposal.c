@@ -380,7 +380,7 @@ double draw_from_volume_prior_uniform(struct Data *data, struct Model * model, s
     galactocentric_to_sky_distance(x, &phi, &theta, &dist);
 
     // convert to the units params expects.
-    params[COSTHETA] = cos(theta);
+    params[COSTHETA] = sin(theta);
     params[PHI] = phi;
     params[DIST] = dist;
 
