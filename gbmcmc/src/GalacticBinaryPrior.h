@@ -39,12 +39,20 @@
 #define GALAXY_BB_X (40.0*GALAXY_Rd) //!< Dimension of galactic bounding box in galactocentric x (kpc) used in generating sky location and 3d galaxy prior.
 #define GALAXY_BB_Y (40.0*GALAXY_Rd) //!< Dimension of galactic bounding box in galactocentric y (kpc) used in generating sky location and 3d galaxy prior.
 #define GALAXY_BB_Z (80.0*GALAXY_Zd) //!< Dimension of galactic bounding box in galactocentric z (kpc) used in generating sky location and 3d galaxy prior.
+
+#define GALAXY_BS_R 40.0 //!< Dimension of the bounding sphere for the spherical volume prior (kpc)
 ///@}
 
 ///@name Calibration prior
 ///@{
 #define CAL_SIGMA_PHASE 0.35 //!< 1-\f$\sigma\f$ phase error (rad) \f${\sim}30^\circ\f$
 #define CAL_SIGMA_AMP 0.20 //!< 1-\f$\sigma\f$ fractional amplitude error
+///@}
+
+///@name Amplitude/SNR prior
+///@{
+#define LOG_AMP_MAX (-45.0)
+#define LOG_AMP_MIN (-60.0)
 ///@}
 
 /*!
@@ -146,6 +154,17 @@ int check_range(double *params, double **uniform_prior, int NP);
  */
 void set_galaxy_prior(struct Flags *flags, struct Prior *prior);
 
+
+/**
+\brief Set up sky location and distance prior assuming galactic distribution
+
+ Evaluates a symmetric bulge and disk model of galaxy, at lattice points
+ defined by sky location from earth and distance using spherical coordinates.
+
+ This is then used as a volumetric sky location + distance prior.
+ */
+void set_volume_prior(struct Flags *flags, struct Prior *prior);
+
 /**
 \brief Sets Gaussian Mixture Model prior for source model
  */
@@ -226,6 +245,36 @@ double evaluate_gmm_prior(struct Data *data, struct GMM *gmm, double *params);
 */
 /**
  \brief Rotate earth-origin galactic XYZ coordinates to ecliptic XYZ coordinates
+
+ This matrix is derivable (approximately) via the following steps:
+
+ 1) Calculate the A_g matrix available at [1]. This matrix takes galactocentric earth centered
+    coordinates r_g and produces equatorial ICRS coordinates as r_eq = A_g*r_g
+ 2) Use the obliquity of the ecliptic (e) to Calculate a rotation matrix by +e 
+    around the x axis. e=(84381.406 arcsec)*(4.848136811095359935899141e-6 radians / arcsec) [2]
+    The rotation matrix is {{1,0,0},{0,cos e, sin e}, {0,-sin e, cos e}} [3]
+    This matrix acts to turn equatorial into eccliptic as r_ec = M*r_eq
+ 3) Multiply M*A_g to give a matrix that does the full transformation.
+
+ Note that this matrix assumes r_g is given in a right handed coordinate system where earth
+ is at the origin, +x points toward the galactic center, and +z points toward the galactic 
+ north pole.
+
+ A numpy based calculation of this matrix is as follows:
+
+ import numpy as np
+ A_g = [[-0.0548755604162154, +0.4941094278755837, -0.8676661490190047],
+       [-0.8734370902348850, -0.4448296299600112, -0.1980763734312015],
+       [-0.4838350155487132, +0.7469822444972189, +0.4559837761750669]]
+ e =(84381.406)*(4.848136811095359935899141e-6) 
+ M = [[1,0,0],[0,np.cos(e), np.sin(e)],[0,-np.sin(e), np.cos(e)]]
+ final = np.dot(M, A_g)
+
+ [1] Gaia Data release 3 documentation 4.1.7 "Transformations of astrometric data and error propagation"
+     See Equation 4.62/4.63 
+     https://gea.esac.esa.int/archive/documentation/GDR3/Data_processing/chap_cu3ast/sec_cu3ast_intro/ssec_cu3ast_intro_tansforms.html
+ [2] IAU standard value found in ERFA library https://github.com/liberfa/erfa/blob/master/src/ltpecl.c#L47
+ [3] Rotation convention mentioned here https://en.wikipedia.org/wiki/Ecliptic_coordinate_system
 */
 static inline void rotate_galtoeclip(double *xg, double *xe)
 {
@@ -238,6 +287,8 @@ static inline void rotate_galtoeclip(double *xg, double *xe)
 
 /**
  \brief Rotate ecliptic XYZ coordinates to earth-origin galactic XYZ coordinates
+
+  This is simply the transpose of rotate_galtoeclip.
 */
 static inline void rotate_ecliptogal(double *xg, double *xe)
 {
@@ -255,8 +306,13 @@ static inline void galactocentric_to_sky_distance(/*in*/ double x[3], /*out*/ do
 {
     double xe[3], xg[3];
 
-    xg[0] = x[0] - GALAXY_RGC;   // solar barycenter is offset from galactic center along x-axis (by convention)
-    xg[1] = x[1];
+    // solar barycenter is offset from galactic center along the positive x-axis (by convention)
+    // In galactocentric coordinates it is also conventional to point the x axis at
+    // the galactic center. This is the opposite of our galactic bounding box 
+    // coordinate system, which has +x pointing away from the center of the galaxy
+    // To keep the coordinate system right-handed this involves flipping the y axis as well.
+    xg[0] = - x[0] + GALAXY_RGC;
+    xg[1] = - x[1];
     xg[2] = x[2];
 
     /* Rotate from galactic to ecliptic */
@@ -289,9 +345,12 @@ static inline void sky_distance_to_galactocentric(/*out*/ double x[3], /*in*/ do
     // Rotate to galactic
     rotate_ecliptogal(xe, xg);
 
-    // Solar barycenter is offset from galactic center along x axis
-    x[0] = xg[0] + GALAXY_RGC;
-    x[1] = xg[1];
+    // Solar barycenter is offset from galactic center along the positive x axis
+    // We must also flip our X and Y axes from the galactocentric convention
+    // back to bounding box coordinates. Reverse of the transform step done in 
+    // galactocentric_to_sky_distance
+    x[0] = - xg[0] + GALAXY_RGC;
+    x[1] = - xg[1];
     x[2] = xg[2];
 }
 

@@ -393,20 +393,17 @@ double draw_from_uniform_prior(struct Data *data, struct Model *model, struct So
 
     //frequency, sky location, amplitude(skipped), inclination, polarization, phase, fdot (and fdouble-dot)
     for(int n=0; n < source->NP; n++) {
-        // For volume prior sky location and distance are drawn differently, 
-        // and dfdtastro is not a uniform parameter.
-        if(is_param(DIST) && (n==COSTHETA || n==PHI || n==DIST || n==DFDTASTRO)) continue;
+        // For volume prior distance and MC are handled by draw_signal_amplitude. 
+        // and dfdtastro may not be a uniform parameter.
+        if(is_param(DIST) && (n==MC || n==DIST || n==DFDTASTRO)) continue;
         // Amplitude is always drawn based on SNR prior
         if(is_param(AMP) && (n==AMP)) continue; 
         logQ -= draw_uniform_parameter(n, model, params, seed);
     }
 
-    if(is_param(DIST)) {
-        logQ -= draw_from_volume_prior_uniform(data, model, source, params, seed);
-        logQ += draw_dfdtastro(proposal, data, model, params, seed);
-    } else {
-        logQ += draw_signal_amplitude(data, model, source, proposal, params, seed);
-    }
+    if(is_param(DIST))  logQ += draw_dfdtastro(proposal, data, model, params, seed); 
+
+    logQ += draw_signal_amplitude(data, model, source, proposal, params, seed);
 
     return logQ;
 }
@@ -519,8 +516,8 @@ double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED stru
     
     //Get bounds on SNR
     double SNR = 1.0;
-    assert(is_param(AMP)); // xcxc todo check calls to this function
-    double SNRmax = exp(model->prior[AMP][1])*SNR1;
+
+    double SNRmax = exp(LOG_AMP_MAX)*SNR1;
     
     //Get max of prior density for rejection sampling
     double maxP = snr_prior(SNRPEAK);
@@ -529,23 +526,30 @@ double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED stru
     double alpha = 1;
     double P = 0;
     int counter=0;
+    bool fail = false;
     do
     {
         SNR   = SNRmax*gsl_rng_uniform(seed);
         P     = snr_prior(SNR);
         alpha = maxP*gsl_rng_uniform(seed);
-        
+
+        if(is_param(DIST) && is_param(MC)) {
+            draw_uniform_parameter(MC, model, params, seed);
+            params[DIST] = galactic_binary_dL_from_Mc(params[F0]/data->T, SNR*iSNR1, params[MC]);
+            params[DIST] /= 1000;  
+        }
+    
         counter++;
         
         //you had your chance
-        if(counter>10000)
-        {
-            params[AMP] = log(SNR*iSNR1);
-            return -INFINITY;
-        }
-    }while(alpha > P);
-    params[AMP] = log(SNR*iSNR1);
-    return evaluate_snr_prior(data, model, params);
+        fail = (counter>10000);
+        if(fail) break;
+
+    }while(alpha > P || (is_param(DIST) && params[DIST] > GALAXY_BS_R));
+
+    if(is_param(AMP)) params[AMP] = log(SNR*iSNR1);
+
+    return fail ? -INFINITY : evaluate_snr_prior(data, model, params);
 }
 
 double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
@@ -597,7 +601,7 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
     if(params[COSI] >= 1.) params[COSI] = source->params[COSI] - jump[COSI];
 
     //safety check for distance
-    if(is_param(DIST) && params[DIST] < 0.0) params[DIST] = source->params[DIST] - jump[DIST];
+    if(is_param(DIST) && (params[DIST] < 0.0 || params[DIST] > GALAXY_BS_R )) params[DIST] = source->params[DIST] - jump[DIST];
     
     for(int j=0; j<NP; j++)
     {

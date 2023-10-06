@@ -43,9 +43,9 @@
 #include "GalacticBinaryPrior.h"
 #include "GalacticBinaryCatalog.h"
 
-static inline double loglike(double *x, int D)
+static inline double galaxy_liklihood(double *x)
 {
-    double u, rsq, z, s, ll;
+    double u, rsq, z, s;
     
     z = x[2];
     rsq = x[0]*x[0]+x[1]*x[1]+x[2]*x[2];
@@ -55,10 +55,11 @@ static inline double loglike(double *x, int D)
     
     // Note that overall rho0 in density is irrelevant since we are working with ratios of likelihoods in the MCMC
     
-    ll = log(GALAXY_A*exp(-rsq/(GALAXY_Rb*GALAXY_Rb))+(1.0-GALAXY_A)*exp(-u/GALAXY_Rd)*s*s);
-    
-    return(ll);
-    
+    return GALAXY_A*exp(-rsq/(GALAXY_Rb*GALAXY_Rb))+(1.0-GALAXY_A)*exp(-u/GALAXY_Rd)*s*s;
+}
+
+static inline double loglike(double *x) {
+    return log(galaxy_liklihood(x));
 }
 
 // Called by galactic prior mcmc to generate a sample
@@ -120,7 +121,7 @@ static inline void alloc_volume_prior(struct Prior *prior, struct Flags *flags, 
 
     calc_sky_buckets(prior, Nth, Nph);
     prior->nr = Nr;
-    prior->dr = (GALAXY_BB_X)/Nr;
+    prior->dr = (GALAXY_BS_R)/Nr;
 
     prior->fdotastroPrior = flags->fdotastroPrior;
 }
@@ -131,7 +132,8 @@ static inline void sky_direction_to_sky_bucket(struct Prior *prior, double costh
     int Nth = prior->ncostheta;
     int Nph = prior->nphi;
     *ith = (int)(0.5*(1.0+costheta)*(double)(Nth));
-    *iph = (int)((2*M_PI-phi)/(2.0*M_PI)*(double)(Nph));
+    //*iph = (int)((2*M_PI-phi)/(2.0*M_PI)*(double)(Nph));
+    *iph = (int)((phi)/(2.0*M_PI)*(double)(Nph));
     
     // Error checking
     if(*ith < 0 || *ith > Nth -1) printf("Out of bounds in Theta direction: %d %d\n", *ith, *iph);
@@ -192,8 +194,8 @@ static inline void sphere_index_to_coords(struct Prior *prior, int index, double
 
     // Convert our single index into indicies along costheta, phi, r directions of our 3d array.
     int costheta_idx = (index / (prior->nphi*prior->nr));
-    int phi_idx = ((index % (prior->nphi*prior->nr))/ prior->nr);
-    int r_idx = (index % (prior->nphi*prior->nr))% prior->nr;
+    int phi_idx =      (index % (prior->nphi*prior->nr))/ prior->nr;
+    int r_idx =        (index % (prior->nphi*prior->nr))% prior->nr;
 
     // add 0.5 to each idx before converting to get the center of each dV region
     *costheta = ((costheta_idx+0.5)*prior->dcostheta) - 1.0;
@@ -249,11 +251,14 @@ void convert_sky_prior(struct Prior *prior, int cnt) {
 // to prevent the prior from biasing toward more distant sources.
 static inline double volume_prior_uniform_contribution(double r_ec){
     // something more plummer-like
-    //double a = 0.5 //kpc
-    //return 1/(r_ec*r_ec + a*a);
+    double a = 10; //kpc
+    return 1/(r_ec*r_ec + a*a);
 
     // 1/r^2
-    return 1/(r_ec*r_ec);
+    //return 1/(r_ec*r_ec);
+
+    // log normal profile
+
 }
 
 // Calculate the triple integral of our uniform contribution function
@@ -263,14 +268,35 @@ double volume_prior_uniform_normalization(struct Prior *prior) {
     int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
     double integral = 0.0;
 
+    fprintf(stdout,"Normalizing Volume Prior Uniform Contribution\n");
     for(int i=0; i< num_buckets; i++) {
         double phi, costheta, r_ec;
         sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
-        double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
+        //double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
+        double dVol = prior->dr * prior->dcostheta * prior->dphi;
         integral += volume_prior_uniform_contribution(r_ec) * dVol;
     }
 
-    return 1/integral;
+    return 1.0/integral;
+}
+
+// Return 1/(integral) where integral is exp(loglike(x))
+//  for all X in our spherical volume
+double galaxy_liklihood_normalization(struct Prior *prior) {
+    int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
+    double integral = 0.0;
+
+    fprintf(stdout,"Normalizing Volume Prior Galaxy Contribution\n");
+    for(int i=0; i< num_buckets; i++) {
+        double x[3];
+        double phi, costheta, r_ec;
+        sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
+        sky_distance_to_galactocentric(x, phi, M_PI/2.0 - acos(costheta), r_ec);
+        //double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
+        double dVol = prior->dr * prior->dcostheta * prior->dphi;
+        integral += galaxy_liklihood(x) * dVol;
+    }
+    return 1.0/integral;
 }
 
 void convert_volume_prior(struct Prior *prior, int cnt) {
@@ -296,6 +322,48 @@ void convert_volume_prior(struct Prior *prior, int cnt) {
         prior->spherehist[i] = log(uniform_contribution + mcmc_contribution);
         if(prior->spherehist[i] > prior->spheremaxp) prior->spheremaxp = prior->spherehist[i];
     }
+}
+
+
+void compute_volume_prior(struct Prior *prior) {
+    int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
+
+    // Amount of total probabilty to redistribute uniformly across volume
+    double uni = 0.1;
+
+    // normalization for the uniform-over-sky-angle contribution
+    double uniform_normalization = uni * volume_prior_uniform_normalization(prior);
+    double galaxy_normalization = (1.0 - uni) * galaxy_liklihood_normalization(prior);
+
+    // todo: Change memory layout so we iterate phi/theta last
+    //       with r as the major coordinate, then make this a double loop
+    //       outer loop iterates r, calculates dVol, inner loop does the rest.
+    //       Should speed this up quite a bit from reduced calculations and 
+    //       memory locality
+    fprintf(stdout,"Computing spherical galaxy prior\n");
+    for(int i = 0; i < num_buckets; i++) {
+        if(i%(num_buckets/100)==0) printProgress((double)i/(double)(num_buckets));
+
+        double phi, costheta, r_ec;
+        double x[3];
+        sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
+
+        // This function expects an angle measured as elevation from ecliptic
+        sky_distance_to_galactocentric(x, phi, M_PI/2.0 - acos(costheta), r_ec);
+        
+        //double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
+
+        double uniform_contribution = uniform_normalization*volume_prior_uniform_contribution(r_ec);
+
+        double galaxy_contribution = galaxy_normalization*galaxy_liklihood(x);
+
+        prior->spherehist[i] = log(uniform_contribution + galaxy_contribution);
+        //prior->spherehist[i] = log(uniform_contribution);
+        //prior->spherehist[i] = log(galaxy_contribution);
+        if(prior->spherehist[i] > prior->spheremaxp) prior->spheremaxp = prior->spherehist[i];
+    }
+    printProgress(1.0);
+    fprintf(stdout,"\n");
 }
 
 // Called in verbose mode to dump the sky prior to a file
@@ -327,12 +395,54 @@ void dump_volume_prior(struct Prior *prior)
     FILE *fptr = fopen("3dsphereprior.dat", "w");
     fprintf(fptr, "# costheta phi r_ec log_density \n");
 
+    FILE *fptrcart = fopen("3dvolumeprior.dat", "w");
+    fprintf(fptrcart, "# x y z log_density \n");
+
+    fprintf(stdout,"Writing spherical galaxy prior to disk.\n");
+
     for(int i = 0; i < num_buckets; i++) {
+        if(i%(num_buckets/100)==0) printProgress((double)i/(double)(num_buckets));
         double phi, costheta, r_ec;
+        double x[3];
         sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
+        // This function expects an angle measured as elevation from ecliptic
+        sky_distance_to_galactocentric(x, phi, M_PI/2.0 - acos(costheta), r_ec);
         fprintf(fptr, "%e %e %e %e\n", costheta, phi, r_ec, prior->spherehist[i]);
+        fprintf(fptrcart, "%e %e %e %e\n", x[0], x[1], x[2], prior->spherehist[i]);
     }
+    printProgress(1.0);
     fclose(fptr);
+    fclose(fptrcart);
+}
+
+// assumes flags->volumePrior = true;
+void set_volume_prior(struct Flags *flags, struct Prior *prior) 
+{
+    int Nth = 200;  // bins in cos theta
+    int Nph = 200;  // bins in phi
+    int Nr = 200;  // bins in r_ec (if applicable)
+
+    if(!flags->quiet)
+    {
+        fprintf(stdout,"\n============ Galaxy model spherical volumetric prior ============\n");
+        fprintf(stdout,"Analytic galaxy model\n");
+        fprintf(stdout,"   Distance to GC  = %g kpc\n",GALAXY_RGC);
+        fprintf(stdout,"   Disk Radius     = %g kpc\n",GALAXY_Rd);
+        fprintf(stdout,"   Disk Height     = %g kpc\n",GALAXY_Zd);
+        fprintf(stdout,"   Bulge Radius    = %g kpc\n",GALAXY_Rb);
+        fprintf(stdout,"   Bulge Fraction  = %g\n",    GALAXY_A);
+        fprintf(stdout,"   Radus around earth (kpc) = %g\n", GALAXY_BS_R);
+        fprintf(stdout,"   Bin counts (costheta, phi, r) = %i, %i, %i\n", Nth, Nph, Nr);
+    }
+
+    alloc_volume_prior(prior, flags, Nth, Nph, Nr);
+
+    compute_volume_prior(prior);
+
+    if(flags->verbose)
+    {
+        dump_volume_prior(prior);
+    }
 }
 
 void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
@@ -389,7 +499,7 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     x[1] = 0.4;
     x[2] = 0.1;
     
-    logLx = loglike(x, D);
+    logLx = loglike(x);
     
     cnt = 0;
     
@@ -399,7 +509,7 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
 
         generate_galaxy_sample(x, y, r);
 
-        logLy = loglike(y, D);
+        logLy = loglike(y);
         
         H = logLy - logLx;
 
@@ -534,8 +644,8 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     
     if(is_param(AMP)) {
         //log amplitude
-        model->prior[AMP][0] = -60.0;
-        model->prior[AMP][1] = -45.0;
+        model->prior[AMP][0] = LOG_AMP_MIN;
+        model->prior[AMP][1] = LOG_AMP_MAX;
     }
     
     //cos inclination
@@ -557,12 +667,9 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
         model->prior[MC][1] = Mcmax;
     }
 
-    // We should never (yet?) be using a uniform prior on distance
-    // If in use it should always be drawn from a 3d volume.
-    // Setting to NaN helps errors in code become visible.
     if(is_param(DIST)) {
-        model->prior[DIST][0] = NAN;
-        model->prior[DIST][1] = NAN;
+        model->prior[DIST][0] = 0;
+        model->prior[DIST][1] = GALAXY_BS_R;
     }
 
     //fdot (bins/Tobs)

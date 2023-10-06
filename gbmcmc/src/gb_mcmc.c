@@ -133,7 +133,8 @@ int main(int argc, char *argv[])
     
     /* Initialize priors */
     struct Prior *prior = alloc_prior();
-    if(flags->galaxyPrior || flags->volumePrior) set_galaxy_prior(flags, prior);
+    if(flags->galaxyPrior) set_galaxy_prior(flags, prior);
+    if(flags->volumePrior) set_volume_prior(flags, prior);
     if(flags->update) set_gmm_prior(flags, data, prior);
     
     /* Initialize MCMC proposals */
