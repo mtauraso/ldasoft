@@ -40,7 +40,9 @@
 #define GALAXY_BB_Y (40.0*GALAXY_Rd) //!< Dimension of galactic bounding box in galactocentric y (kpc) used in generating sky location and 3d galaxy prior.
 #define GALAXY_BB_Z (80.0*GALAXY_Zd) //!< Dimension of galactic bounding box in galactocentric z (kpc) used in generating sky location and 3d galaxy prior.
 
-#define GALAXY_BS_R 40.0 //!< Dimension of the bounding sphere for the spherical volume prior (kpc)
+#define GALAXY_BS_R 50.0 //!< Dimension of the bounding sphere for the spherical volume prior (kpc)
+
+#define DIST_UNI_DRAW 0.3 //!< Weight of uniform-in-distance component of our distance draw function
 ///@}
 
 ///@name Calibration prior
@@ -223,7 +225,7 @@ double evaluate_dfdtastro_prior(struct Prior *prior, struct Data * data, struct 
  */
 double evaluate_sky_location_prior(double *params, double **uniform_prior, double *logPriorVolume, enum SkyPriorMode galaxyFlag, double *skyhist, double dcostheta, double dphi, int nphi);
 
-double evaluate_volume_prior(struct Prior *prior, struct Source *source);
+double evaluate_volume_prior(struct Prior * prior, double *params);
 
 /**
  \brief Computes uniform prior for parameters \f$\vec x\f$

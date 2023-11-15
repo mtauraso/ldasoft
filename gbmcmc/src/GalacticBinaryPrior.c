@@ -272,8 +272,11 @@ double volume_prior_uniform_normalization(struct Prior *prior) {
     for(int i=0; i< num_buckets; i++) {
         double phi, costheta, r_ec;
         sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
-        //double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
-        double dVol = prior->dr * prior->dcostheta * prior->dphi;
+
+        // volume_prior_uniform_contribution has units probability * kpc^-3
+        // Therefore we must sum it over the spherical volume element
+        // to get a total probability.
+        double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
         integral += volume_prior_uniform_contribution(r_ec) * dVol;
     }
 
@@ -292,8 +295,11 @@ double galaxy_liklihood_normalization(struct Prior *prior) {
         double phi, costheta, r_ec;
         sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
         sky_distance_to_galactocentric(x, phi, M_PI/2.0 - acos(costheta), r_ec);
-        //double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
-        double dVol = prior->dr * prior->dcostheta * prior->dphi;
+
+        // Units of galaxy_liklihood are probability * kpc^-3 
+        // So we must use the spherical volume element when summing them.
+        double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
+
         integral += galaxy_liklihood(x) * dVol;
     }
     return 1.0/integral;
@@ -348,18 +354,18 @@ void compute_volume_prior(struct Prior *prior) {
         double x[3];
         sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
 
-        // This function expects an angle measured as elevation from ecliptic
+        // This function expects an angle measured as elevation from ecliptic equator
         sky_distance_to_galactocentric(x, phi, M_PI/2.0 - acos(costheta), r_ec);
-        
-        //double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
 
         double uniform_contribution = uniform_normalization*volume_prior_uniform_contribution(r_ec);
-
         double galaxy_contribution = galaxy_normalization*galaxy_liklihood(x);
 
+        // This has units of log(probability * kpc^-3)
         prior->spherehist[i] = log(uniform_contribution + galaxy_contribution);
+        // for debugging just one part of the probability distribution
         //prior->spherehist[i] = log(uniform_contribution);
         //prior->spherehist[i] = log(galaxy_contribution);
+        
         if(prior->spherehist[i] > prior->spheremaxp) prior->spheremaxp = prior->spherehist[i];
     }
     printProgress(1.0);
@@ -592,6 +598,13 @@ double evaluate_dfdtastro_prior(struct Prior *prior, struct Data * data, struct 
     assert(is_param(DFDTASTRO));
 
     if(prior->fdotastroPrior) {
+        fprintf(stderr, "Currently fdotastro nonuniform prior has not been checked for units, and should not be used.\n");
+        exit(1);
+
+        // TODO: Need to think through given arguments about units of top/bottom of acceptance
+        //       ratio, whether the non-uniform case (prior->fdtoastroPrior = true) works correctly
+        //       here.
+        
         double a = DFDTASTRO_A*data->T*data->T; // convert a to params units
 
         double a_sq = a*a;
@@ -908,8 +921,8 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     
     //set prior volume
     for(int n=0; n<data->NP; n++) {
-        // Prior volume for distance is handled in draw_from_galaxy_prior.
-        if(n == DIST) model->logPriorVolume[n] = 0.0;
+        // Log Prior volume for distance is not constant over distance and is handled in distance_draw_logP
+        if(n == DIST) model->logPriorVolume[n] = NAN;
         else model->logPriorVolume[n] = log(model->prior[n][1]-model->prior[n][0]);
     }
     
@@ -943,12 +956,16 @@ int check_range(double *params, double **uniform_prior, int NP)
     if(params[COSI]<uniform_prior[COSI][0] || params[COSI]>uniform_prior[COSI][1]) return 1;
     
     //polarization
+    if(params[PSI]<uniform_prior[PSI][0] || params[PSI]>uniform_prior[PSI][1]) params[PSI] = fmod(params[PSI], M_PI);
+    // fmod of a negative first arg returns a negative, this should fix with a small number of iterations
     while(params[PSI]<uniform_prior[PSI][0]) params[PSI] += M_PI;
-    while(params[PSI]>uniform_prior[PSI][1]) params[PSI] -= M_PI;
+    if(params[PSI]<uniform_prior[PSI][0] || params[PSI]>uniform_prior[PSI][1]) return 1;
 
     //phase
+    if(params[PHI0]<uniform_prior[PHI0][0] || params[PHI0]>uniform_prior[PHI0][1]) params[PHI0] = fmod(params[PHI0], PI2);
+    // fmod of a negative first arg returns a negative, this should fix value with a small number of iterations
     while(params[PHI0]<uniform_prior[PHI0][0]) params[PHI0] += PI2;
-    while(params[PHI0]>uniform_prior[PHI0][1]) params[PHI0] -= PI2;
+    if(params[PHI0]<uniform_prior[PHI0][0] || params[PHI0]>uniform_prior[PHI0][1]) return 1;
     
     //fdot (bins/Tobs)
     if(is_param(DFDT) && (params[DFDT]<uniform_prior[DFDT][0] || params[DFDT]>uniform_prior[DFDT][1])) return 1;
@@ -959,10 +976,6 @@ int check_range(double *params, double **uniform_prior, int NP)
 
     //mchirp
     if(is_param(MC) && (params[MC]<uniform_prior[MC][0] || params[MC]>uniform_prior[MC][1])) return 1;
-
-    // xcxc (is this still true?)
-    // We don't do distance because it needs to be checked that it is inside the bounding box
-    // of the galaxy. It does not really have a uniform prior.
 
     return 0;
 }
@@ -1085,7 +1098,7 @@ double evaluate_prior(struct Flags *flags, struct Data *data, struct Model *mode
     {
         if(flags->volumePrior) {
             // Sky location and amplitude handled together
-            logP += evaluate_volume_prior(prior, source);
+            logP += evaluate_volume_prior(prior, params);
             logP += evaluate_dfdtastro_prior(prior, data, model, params);
         } else {
             //sky location prior
@@ -1141,8 +1154,7 @@ double evaluate_uniform_priors(double *params, double **uniform_prior, double *l
 }
 
 // Returns the log probability density at the location we drew
-double evaluate_volume_prior(struct Prior *prior, struct Source *source) {
-    double *params = source->params;
+double evaluate_volume_prior(struct Prior *prior, double *params) {
     int index = sky_distance_to_sphere_index(prior, params[COSTHETA], params[PHI], params[DIST]);
     return prior->spherehist[index];
 }
@@ -1207,6 +1219,9 @@ double evaluate_sky_location_prior(double *params, double **uniform_prior, doubl
 
 double evaluate_snr_prior(struct Data *data, struct Model *model, double *params)
 {
+    // We should only ever call this when amplitude is a parameter in the search space
+    assert(is_param(AMP));
+
     //check that frequency is in range
     int n = (int)floor(params[F0] - model->prior[F0][0]);
     if(n<0 || n>=data->N) return -INFINITY;
@@ -1218,16 +1233,8 @@ double evaluate_snr_prior(struct Data *data, struct Model *model, double *params
     //extra factors from TDI convention used for fractional-frequency data
     if(strcmp("frequency",data->format) == 0 || strcmp("sangria",data->format) == 0)
         sf *= asin(data->sine_f_on_fstar);
-        
-    //get GW amplitude
-    double amp;
-    {
-        struct Source temp;
-        map_array_to_params(&temp, params, data->T);
-        amp = temp.amp;
-    }
 
-    double snr = analytic_snr(amp,sn,sf,data->sqT);
+    double snr = analytic_snr(params[AMP],sn,sf,data->sqT);
     
     return log(snr_prior(snr));
 }

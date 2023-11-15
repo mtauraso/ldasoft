@@ -44,7 +44,7 @@ extern int NUM_PARAMS;
 #define F0             (p_Ext2Int[0])
 #define F0_DESC        "Principle frequency unitless ratio [Hz*(data duration)^-1]"
 #define COSTHETA       (p_Ext2Int[1])
-#define COSTHETA_DESC  "Sky location Cos of latitude angle in elliptic coordinates dimensionless [-1,1]"
+#define COSTHETA_DESC  "Sky location Cos of co-latitude angle in elliptic coordinates dimensionless [-1,1]"
 #define PHI            (p_Ext2Int[2])
 #define PHI_DESC       "Sky location longitude angle in elliptic coordinates radians [0, 2pi]"
 #define AMP            (p_Ext2Int[3])

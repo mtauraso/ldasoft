@@ -352,8 +352,14 @@ static inline double draw_uniform_parameter(int index, struct Model *model, doub
     return model->logPriorVolume[index];
 }
 
+#if 0
 // Draw uniform
 // Use prior to determine proposal probability for rjmcmc. 
+// Note: This function is unused
+// TODO: make sure we have enough information to call this on a proposal that is not a prior proposal.
+//    evaluate_dfdtastro_prior does its job based off the prior->fdotastroPrior field
+//    When we are called with a non-prior proposal there is currently no way to get that field
+//    we unpack a random value
 static inline double draw_dfdtastro(struct Proposal *proposal, struct Data* data, struct Model * model, double *params, gsl_rng *seed) {
 
     // Pick a random number between the min and max of the fdot astro prior
@@ -364,6 +370,66 @@ static inline double draw_dfdtastro(struct Proposal *proposal, struct Data* data
     unpack_prior_proposal(proposal, &prior);
 
     return evaluate_dfdtastro_prior(&prior, data, model, params);
+}
+#endif
+
+static inline double distance_draw_logP(double r) {
+// The probability density we use to draw has two components
+// where R = GALAXY_BS_R, and both are normalized
+//
+// f(r) = 1/(4*pi) 3/R^3  is uniform over the bounding sphere of radius R.
+// g(r) = 1/(4*pi) 1/(r^2*R) is uniform in r coordinate, but not uniform over volume
+//
+// The combined probability distribution we draw from is (with a = DIST_UNI_DRAW)
+// h(r) = (1-a)*f(r) + a*g(r)
+//
+// Since the 1/(4*pi) factor is already included in the combined proposal
+// probability by the code drawing params[PHI] and params[COSTHETA], when we draw
+// distance we must only make up the remaining factor of
+//
+// h_r(r) = (1-a)*3/R^3 + a/(r^2 * R)
+//
+// We can factor a 1/R out, and log(h_r(r)) becomes :
+    return log((1.0-DIST_UNI_DRAW)*3.0/(GALAXY_BS_R*GALAXY_BS_R) + DIST_UNI_DRAW/(r*r)) - log(DIST_UNI_DRAW);
+}
+
+static inline double distance_draw_P(double r) {
+// This is the version of h_r(r) (see distance_draw_logP) used for rejection sampling
+//
+// For rejection sampling we want the maximum value to be 1.0 when r == R.
+// We also want a 1 dimensional probability density over the r coordinate with units
+// probability/kpc
+//
+// The function we want can be written P(r) = h_r(r) * r^2
+// It can be shown from normalization arguments that if h(r) is normalized over dV
+// then P(r) is normalized over the interval [0, R].
+//
+// P(r) = 1/R [(1-a) 3r^2/R^2 + a]
+//
+// P(r) takes on its largest value at r==R of P(R) = (3-2a)/R
+//
+// P_rej(r) that minimizes rejection rate when compared to [0,1) would have a maximum value of 1.0
+//
+// P_rej(r) = (1-a) 3r^2/((3-2a)R^2) + a/(3-2a)
+    double alpha = 3.0 - 2.0 * DIST_UNI_DRAW;
+    double rsq = r*r;
+    double Rsq = GALAXY_BS_R*GALAXY_BS_R;
+    double a = DIST_UNI_DRAW;
+    return (1.0 - a) * 3.0 * rsq/(alpha*Rsq) + a/alpha;
+}
+
+double draw_distance(struct Data *data, struct Model *model, struct Source *source, double *params, gsl_rng *seed)
+{
+    double dist, alpha, P;
+    do {
+        dist = gsl_rng_uniform(seed) * GALAXY_BS_R;
+        P = distance_draw_P(dist);
+        alpha = gsl_rng_uniform(seed);
+    } while(alpha > P);
+
+    params[DIST] = dist;
+
+    return distance_draw_logP(dist);
 }
 
 // Does the draw from the volume prior and returns the probability associated with that draw.
@@ -393,17 +459,21 @@ double draw_from_uniform_prior(struct Data *data, struct Model *model, struct So
 
     //frequency, sky location, amplitude(skipped), inclination, polarization, phase, fdot (and fdouble-dot)
     for(int n=0; n < source->NP; n++) {
-        // For volume prior distance and MC are handled by draw_signal_amplitude. 
-        // and dfdtastro may not be a uniform parameter.
-        if(is_param(DIST) && (n==MC || n==DIST || n==DFDTASTRO)) continue;
+        // For volume prior distance is handled by draw_distance
+        if(is_param(DIST) && (n==DIST)) continue;
         // Amplitude is always drawn based on SNR prior
         if(is_param(AMP) && (n==AMP)) continue; 
         logQ -= draw_uniform_parameter(n, model, params, seed);
     }
 
-    if(is_param(DIST))  logQ += draw_dfdtastro(proposal, data, model, params, seed); 
-
-    logQ += draw_signal_amplitude(data, model, source, proposal, params, seed);
+    if(is_param(DIST)&& is_param(DFDTASTRO)) {
+        // TODO fdotastro prior make sure there is enough information to call this line even when our
+        // proposal structure is not a prior (e.g. f-statistic draw function calls us)
+        //logQ += draw_dfdtastro(proposal, data, model, params, seed);
+        logQ += draw_distance(data, model, source, params, seed);
+    } else {
+        logQ += draw_signal_amplitude(data, model, source, proposal, params, seed);
+    }
 
     return logQ;
 }
@@ -1891,10 +1961,20 @@ double evaluate_fstatistic_proposal(struct Data *data, UNUSED struct Model *mode
     double *skyhist = NULL; //dummy pointer for sky location prior
     
     //sky location prior
+    // This looks complicated but in the case that params[PHI] and params[COSTHETA] represent a location within
+    // the bounds of our search space, this just returns -(model->LogPriorVolume[PHI] + model->logPriorVoume[COSTHETA])
     logP += evaluate_sky_location_prior(params, model->prior, model->logPriorVolume, uniformPrior, skyhist, 1, 1, 1);
-    
-    //amplitude prior
-    logP += evaluate_snr_prior(data, model, params);
+
+    if(is_param(DIST) && is_param(DFDTASTRO)) {
+        // Phi & costheta were handled by evaluate_sky_location_prior, this handles distance
+        logP += distance_draw_logP(params[DIST]);
+
+        // dfdt_astro uniform prior volume
+        logP -= model->logPriorVolume[DFDTASTRO];
+    } else {
+        //amplitude prior
+        logP += evaluate_snr_prior(data, model, params);
+    }
     
     //everything else uses simple uniform priors
     logP += evaluate_uniform_priors(params, model->prior, model->logPriorVolume, model->NP);
@@ -1941,7 +2021,7 @@ double prior_density(struct Data *data, struct Model *model, struct Source *sour
     if (galaxyPriorMode==volumePrior) {
         // Branch here because volume prior alters our amplitude calculation
         // Amplitude was actually calculated from a draw of M_chirp and XYZ, not in the normal fashion.
-        logP += evaluate_volume_prior(&prior, source);
+        logP += evaluate_volume_prior(&prior, source->params);
         logP += evaluate_dfdtastro_prior(&prior, data, model, params);
     } else {
         //sky location prior
