@@ -40,9 +40,13 @@
 #define GALAXY_BB_Y (40.0*GALAXY_Rd) //!< Dimension of galactic bounding box in galactocentric y (kpc) used in generating sky location and 3d galaxy prior.
 #define GALAXY_BB_Z (80.0*GALAXY_Zd) //!< Dimension of galactic bounding box in galactocentric z (kpc) used in generating sky location and 3d galaxy prior.
 
-#define GALAXY_BS_R 50.0 //!< Dimension of the bounding sphere for the spherical volume prior (kpc)
+///@}
 
+///@name Galaxy Prior
+///@{
+#define GALAXY_BS_R 50.0 //!< Dimension of the bounding sphere for the spherical volume prior (kpc)
 #define DIST_UNI_DRAW 0.3 //!< Weight of uniform-in-distance component of our distance draw function
+#define VOL_PRIOR_UNI 0.1 //!< Weight of uniform over volume contribution to volume prior
 ///@}
 
 ///@name Calibration prior

@@ -303,13 +303,14 @@ double galaxy_liklihood_normalization(struct Prior *prior) {
         integral += galaxy_liklihood(x) * dVol;
     }
     return 1.0/integral;
+
 }
 
 void convert_volume_prior(struct Prior *prior, int cnt) {
     int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
 
     // Amount of total probabilty to redistribute uniformly across volume
-    double uni = 0.1;
+    double uni = VOL_PRIOR_UNI;
 
     // Normalizing factor for converting count-> probability but with unitary 
     // contribution subtracted out.
@@ -335,7 +336,7 @@ void compute_volume_prior(struct Prior *prior) {
     int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
 
     // Amount of total probabilty to redistribute uniformly across volume
-    double uni = 0.1;
+    double uni = VOL_PRIOR_UNI;
 
     // normalization for the uniform-over-sky-angle contribution
     double uniform_normalization = uni * volume_prior_uniform_normalization(prior);
