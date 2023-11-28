@@ -44,8 +44,9 @@
 
 ///@name Galaxy Prior
 ///@{
-#define GALAXY_BS_R 50.0 //!< Dimension of the bounding sphere for the spherical volume prior (kpc)
-#define DIST_UNI_DRAW 0.3 //!< Weight of uniform-in-distance component of our distance draw function
+#define MC_MIN 0.15 //!< Minimum mass for M_chirp prior (M_sun units)
+#define MC_MAX 1.0  //!< Maximum mass for M_chirp prior (M_sun units)
+#define DIST_UNI_DRAW 0.2 //!< Weight of uniform-in-distance component of our distance draw function
 #define VOL_PRIOR_UNI 0.1 //!< Weight of uniform over volume contribution to volume prior
 ///@}
 
@@ -169,7 +170,7 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior);
 
  This is then used as a volumetric sky location + distance prior.
  */
-void set_volume_prior(struct Flags *flags, struct Prior *prior);
+void set_volume_prior(struct Flags *flags, struct Prior *prior, struct Data *data);
 
 /**
 \brief Sets Gaussian Mixture Model prior for source model

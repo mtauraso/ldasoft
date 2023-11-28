@@ -143,6 +143,11 @@ struct Data
     char **cache; //!<contents of cache file
     struct Catalog *catalog; //!< data and metadata for known sources
     ///@}
+
+    /** @name Volume Prior calculations */
+    ///@{
+    double galaxy_bs_r; //! Bounding sphere dimension in kpc for distance prior. Set by set_search_volume.
+    ///@}
 };
 
 /*!

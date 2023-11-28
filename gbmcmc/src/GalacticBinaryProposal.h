@@ -136,7 +136,7 @@ For the amplitude parameter this function performs true rejection sampling on a 
  @return logQ = \f$\ln p(\f$ \c params \f$)\f$
 
  */
-double draw_from_uniform_prior(UNUSED struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed);
+double draw_from_uniform_prior(struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed);
 
 /**
 \brief Fair draw from prior for location and orientation parameters
@@ -169,7 +169,7 @@ double draw_from_extrinsic_prior(UNUSED struct Data *data, struct Model *model, 
  
 
  */
-double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed);
+double draw_from_fisher(struct Data *data, struct Model *model, struct Source *source, struct Proposal *proposal, double *params, gsl_rng *seed);
 
 /**
  \brief Draw each parameter from 1D marginalized CDF

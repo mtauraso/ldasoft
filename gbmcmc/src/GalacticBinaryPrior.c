@@ -30,6 +30,7 @@
 #include <gsl/gsl_linalg.h>
 #include <gsl/gsl_vector.h>
 #include <gsl/gsl_eigen.h>
+#include <gsl/gsl_statistics_double.h>
 
 #include <GMM_with_EM.h>
 
@@ -115,13 +116,13 @@ static inline void alloc_sky_prior(struct Prior * prior, int Nth, int Nph) {
     prior->skymaxp = 0.0;
 }
 
-static inline void alloc_volume_prior(struct Prior *prior, struct Flags *flags, int Nth, int Nph, int Nr) {
+static inline void alloc_volume_prior(struct Prior *prior, struct Flags *flags, int Nth, int Nph, int Nr, double galaxy_bs_r) {
     prior->spherehist = (double*)calloc((Nth*Nph*Nr), sizeof(double));
     prior->spheremaxp = 0.0;
 
     calc_sky_buckets(prior, Nth, Nph);
     prior->nr = Nr;
-    prior->dr = (GALAXY_BS_R)/Nr;
+    prior->dr = (galaxy_bs_r)/Nr;
 
     prior->fdotastroPrior = flags->fdotastroPrior;
 }
@@ -173,21 +174,6 @@ static inline void sample_sky_prior(struct Prior *prior, double *chain_sample)
     sky_direction_to_sky_bucket(prior, sin(theta), phi, &ith, &iph);
 
     prior->skyhist[ith*Nph+iph] += 1.0;
-}
-
-// Called by the galactic prior generator to sample the chain and generate the 3d volumetric galaxy prior
-static inline void sample_volume_prior(struct Prior *prior, double *chain_sample) {
-    double phi, theta, r_ec;
-    galactocentric_to_sky_distance(chain_sample, &phi, &theta, &r_ec);
-    
-    // sin(theta) here because the "theta" returned by galactocentric_to_sky_distance is 
-    // an elevation angle measured from the celestial equator with range [-pi/2, pi/2]
-    // This function expects a coordinate which is cos("theta" + pi/2) with the range [-1,1]
-    // as is typical of params, e.g. The cosine of an angle measured positively from the north pole
-    int i = sky_distance_to_sphere_index(prior, sin(theta), phi, r_ec);
-
-    // Index, add one to the count
-    prior->spherehist[i] += 1.0;
 }
 
 static inline void sphere_index_to_coords(struct Prior *prior, int index, double *costheta, double *phi, double *r_ec ) {
@@ -306,32 +292,6 @@ double galaxy_liklihood_normalization(struct Prior *prior) {
 
 }
 
-void convert_volume_prior(struct Prior *prior, int cnt) {
-    int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
-
-    // Amount of total probabilty to redistribute uniformly across volume
-    double uni = VOL_PRIOR_UNI;
-
-    // Normalizing factor for converting count-> probability but with unitary 
-    // contribution subtracted out.
-    double count_normalization = (1.0 - uni)/(double)(cnt);
-
-    // normalization for the uniform-over-sky-angle contribution
-    double uniform_normalization = uni * volume_prior_uniform_normalization(prior);
-
-    for(int i = 0; i < num_buckets; i++) {
-        double phi, costheta, r_ec;
-        sphere_index_to_coords(prior, i, &costheta, &phi, &r_ec);
-        double dVol = r_ec * r_ec * prior->dr * prior->dcostheta * prior->dphi;
-        double uniform_contribution = uniform_normalization*volume_prior_uniform_contribution(r_ec)/dVol;
-        double mcmc_contribution = count_normalization*prior->spherehist[i]/dVol;
-
-        prior->spherehist[i] = log(uniform_contribution + mcmc_contribution);
-        if(prior->spherehist[i] > prior->spheremaxp) prior->spheremaxp = prior->spherehist[i];
-    }
-}
-
-
 void compute_volume_prior(struct Prior *prior) {
     int num_buckets = prior->ncostheta*prior->nphi*prior->nr;
 
@@ -422,9 +382,46 @@ void dump_volume_prior(struct Prior *prior)
     fclose(fptrcart);
 }
 
+// Use the noise model to evaluate the max distance
+// for the galaxy prior
+/**
+ Only in use in --volume-prior mode.
+ Evaluates the distance corresponding to:
+  - A source at the high end of our chirp mass prior, 
+    the loudest source for which there is prior support
+  - That same source having an SNR of 5
+  - In the center of our frequency range
+  - Over the observation time we are analyzing.
+
+ This determines the bounding sphere for the distance prior.
+
+ Puts the result in data->galaxy_bs_r
+ */
+void set_search_volume(struct Flags *flags, struct Data *data){
+    assert(flags->volumePrior);
+
+    double SNR_cutoff = 5.0;
+    double sf = data->sine_f_on_fstar;
+
+    //Sensitivity
+    // We want the smallest Sn value for noise.
+    double Sn = gsl_stats_min(data->noise[0]->SnA, 1, data->noise[0]->N);
+
+    // Which will give us lowest amplitude corresponding to our SNR cutoff
+    double amp = amp_from_snr(SNR_cutoff, Sn, sf, data->sqT);
+
+    // Largest frequency here to find the largest possible distance.
+    // Largest mass to again maximize distance.
+    double dist = galactic_binary_dL_from_Mc(data->fmax, amp, MC_MAX);
+
+    data->galaxy_bs_r = dist/1000.0;
+}
+
 // assumes flags->volumePrior = true;
-void set_volume_prior(struct Flags *flags, struct Prior *prior) 
+void set_volume_prior(struct Flags *flags, struct Prior *prior, struct Data *data) 
 {
+    set_search_volume(flags, data);
+
     int Nth = 200;  // bins in cos theta
     int Nph = 200;  // bins in phi
     int Nr = 200;  // bins in r_ec (if applicable)
@@ -438,11 +435,11 @@ void set_volume_prior(struct Flags *flags, struct Prior *prior)
         fprintf(stdout,"   Disk Height     = %g kpc\n",GALAXY_Zd);
         fprintf(stdout,"   Bulge Radius    = %g kpc\n",GALAXY_Rb);
         fprintf(stdout,"   Bulge Fraction  = %g\n",    GALAXY_A);
-        fprintf(stdout,"   Radus around earth (kpc) = %g\n", GALAXY_BS_R);
+        fprintf(stdout,"   Radus around earth (kpc) = %g\n", data->galaxy_bs_r);
         fprintf(stdout,"   Bin counts (costheta, phi, r) = %i, %i, %i\n", Nth, Nph, Nr);
     }
 
-    alloc_volume_prior(prior, flags, Nth, Nph, Nr);
+    alloc_volume_prior(prior, flags, Nth, Nph, Nr, data->galaxy_bs_r);
 
     compute_volume_prior(prior);
 
@@ -454,6 +451,7 @@ void set_volume_prior(struct Flags *flags, struct Prior *prior)
 
 void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
 {
+    assert(!flags->volumePrior);
     if(!flags->quiet)
     {
         if(flags->galaxyPrior) fprintf(stdout,"\n============ Galaxy model sky prior ============\n");
@@ -471,7 +469,6 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     int D = 3;  // number of parameters
     int Nth = 200;  // bins in cos theta
     int Nph = 200;  // bins in phi
-    int Nr = 200;  // bins in r_ec (if applicable)
     int MCMC=100000000;
     int j;
     int cnt;
@@ -498,8 +495,7 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
     x =  (double*)calloc(D,sizeof(double));
     y =  (double*)calloc(D,sizeof(double));
     
-    if(flags->galaxyPrior) alloc_sky_prior(prior, Nth, Nph);
-    if(flags->volumePrior) alloc_volume_prior(prior, flags, Nth, Nph, Nr);
+    alloc_sky_prior(prior, Nth, Nph);
     
     // starting values for parameters
     x[0] = 0.5;
@@ -531,21 +527,17 @@ void set_galaxy_prior(struct Flags *flags, struct Prior *prior)
         
         if(mc%100 == 0)
         {
-            // TODO flags -> --3d-galaxy-prior, only do one of these sampling processes.
-            if(flags->galaxyPrior) sample_sky_prior(prior, x);
-            if(flags->volumePrior) sample_volume_prior(prior, x);
+            sample_sky_prior(prior, x);
             cnt++;
         }
     }
 
-    if(flags->galaxyPrior) convert_sky_prior(prior, cnt);
-    if(flags->volumePrior) convert_volume_prior(prior, cnt);
+    convert_sky_prior(prior, cnt);
 
     // Output sky prior in verbsoe mode
     if(flags->verbose)
     {
-        if(flags->galaxyPrior) dump_sky_prior(prior);
-        if(flags->volumePrior) dump_volume_prior(prior);
+        dump_sky_prior(prior);
     }
     
     free(x);
@@ -674,16 +666,14 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
     model->prior[PHI0][0] = 0.0;
     model->prior[PHI0][1] = PI2;
     
-    double Mcmin = 0.15;
-    double Mcmax = 1.00;
     if(is_param(MC)) {
-        model->prior[MC][0] = Mcmin;
-        model->prior[MC][1] = Mcmax;
+        model->prior[MC][0] = MC_MIN;
+        model->prior[MC][1] = MC_MAX;
     }
 
     if(is_param(DIST)) {
         model->prior[DIST][0] = 0;
-        model->prior[DIST][1] = GALAXY_BS_R;
+        model->prior[DIST][1] = data->galaxy_bs_r;
     }
 
     //fdot (bins/Tobs)
@@ -702,8 +692,8 @@ void set_uniform_prior(struct Flags *flags, struct Model *model, struct Data *da
 
     /* use prior on chirp mass to convert to priors on frequency evolution */
     /* driven by gravitational waves alone*/
-    double fdotgrmin = galactic_binary_fdot(Mcmin, fmin);
-    double fdotgrmax = galactic_binary_fdot(Mcmax, fmax); 
+    double fdotgrmin = galactic_binary_fdot(MC_MIN, fmin);
+    double fdotgrmax = galactic_binary_fdot(MC_MAX, fmax); 
     
     // Ensure our prior on fdotastro allows any mc parameter to hit the full 
     // range of [fdotmin, fdotmax]. This the least constraining version of the

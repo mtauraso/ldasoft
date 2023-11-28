@@ -94,6 +94,7 @@ double snr(struct Source *source, struct Noise *noise);
  @return \f$ \rho \approx  \frac{1}{2} \mathcal{A} \sqrt{T} S_f / S_n \f$
  */
 double analytic_snr(double A, double Sn, double Sf, double sqT);
+double amp_from_snr(double SNR, double Sn, double Sf, double sqT);
 
 /**
 \brief Compute prior on SNR

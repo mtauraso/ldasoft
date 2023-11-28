@@ -82,6 +82,11 @@ double analytic_snr(double A, double Sn, double Sf, double sqT)
     return 0.5*A*sqT*Sf/sqrt(Sn); //not exactly what's in paper--calibrated against (h|h)
 }
 
+double amp_from_snr(double SNR, double Sn, double Sf, double sqT)
+{
+    return SNR*sqrt(Sn)/(Sf*sqT*0.5); // reverse of analytic_snr, returns amplitude corresponding to an SNR
+}
+
 double snr(struct Source *source, struct Noise *noise)
 {
     double snr2=0.0;

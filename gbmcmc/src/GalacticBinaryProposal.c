@@ -373,7 +373,7 @@ static inline double draw_dfdtastro(struct Proposal *proposal, struct Data* data
 }
 #endif
 
-static inline double distance_draw_logP(double r) {
+static inline double distance_draw_logP(double r, double galaxy_bs_r) {
 // The probability density we use to draw has two components
 // where R = GALAXY_BS_R, and both are normalized
 //
@@ -390,10 +390,10 @@ static inline double distance_draw_logP(double r) {
 // h_r(r) = (1-a)*3/R^3 + a/(r^2 * R)
 //
 // We can factor a 1/R out, and log(h_r(r)) becomes :
-    return log((1.0-DIST_UNI_DRAW)*3.0/(GALAXY_BS_R*GALAXY_BS_R) + DIST_UNI_DRAW/(r*r)) - log(DIST_UNI_DRAW);
+    return log((1.0-DIST_UNI_DRAW)*3.0/(galaxy_bs_r*galaxy_bs_r) + DIST_UNI_DRAW/(r*r)) - log(DIST_UNI_DRAW);
 }
 
-static inline double distance_draw_P(double r) {
+static inline double distance_draw_P(double r, double galaxy_bs_r) {
 // This is the version of h_r(r) (see distance_draw_logP) used for rejection sampling
 //
 // For rejection sampling we want the maximum value to be 1.0 when r == R.
@@ -413,7 +413,7 @@ static inline double distance_draw_P(double r) {
 // P_rej(r) = (1-a) 3r^2/((3-2a)R^2) + a/(3-2a)
     double alpha = 3.0 - 2.0 * DIST_UNI_DRAW;
     double rsq = r*r;
-    double Rsq = GALAXY_BS_R*GALAXY_BS_R;
+    double Rsq = galaxy_bs_r*galaxy_bs_r;
     double a = DIST_UNI_DRAW;
     return (1.0 - a) * 3.0 * rsq/(alpha*Rsq) + a/alpha;
 }
@@ -422,14 +422,14 @@ double draw_distance(struct Data *data, struct Model *model, struct Source *sour
 {
     double dist, alpha, P;
     do {
-        dist = gsl_rng_uniform(seed) * GALAXY_BS_R;
-        P = distance_draw_P(dist);
+        dist = gsl_rng_uniform(seed) * data->galaxy_bs_r;
+        P = distance_draw_P(dist, data->galaxy_bs_r);
         alpha = gsl_rng_uniform(seed);
     } while(alpha > P);
 
     params[DIST] = dist;
 
-    return distance_draw_logP(dist);
+    return distance_draw_logP(dist, data->galaxy_bs_r);
 }
 
 // Does the draw from the volume prior and returns the probability associated with that draw.
@@ -578,6 +578,8 @@ double draw_calibration_parameters(struct Data *data, struct Model *model, gsl_r
 
 double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
 {
+    assert(is_param(AMP));
+
     int n = (int)floor(params[F0] - model->prior[F0][0]);
     double sf = data->sine_f_on_fstar;
     double sn = model->noise[0]->SnA[n]*model->noise[0]->etaA;
@@ -602,27 +604,19 @@ double draw_signal_amplitude(struct Data *data, struct Model *model, UNUSED stru
         SNR   = SNRmax*gsl_rng_uniform(seed);
         P     = snr_prior(SNR);
         alpha = maxP*gsl_rng_uniform(seed);
-
-        if(is_param(DIST) && is_param(MC)) {
-            draw_uniform_parameter(MC, model, params, seed);
-            params[DIST] = galactic_binary_dL_from_Mc(params[F0]/data->T, SNR*iSNR1, params[MC]);
-            params[DIST] /= 1000;  
-        }
-    
         counter++;
         
         //you had your chance
         fail = (counter>10000);
         if(fail) break;
-
-    }while(alpha > P || (is_param(DIST) && params[DIST] > GALAXY_BS_R));
+    }while(alpha > P);
 
     if(is_param(AMP)) params[AMP] = log(SNR*iSNR1);
 
     return fail ? -INFINITY : evaluate_snr_prior(data, model, params);
 }
 
-double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
+double draw_from_fisher(struct Data *data, struct Model *model, struct Source *source, UNUSED struct Proposal *proposal, double *params, gsl_rng *seed)
 {
     int i,j;
     int NP=source->NP;
@@ -671,7 +665,7 @@ double draw_from_fisher(UNUSED struct Data *data, struct Model *model, struct So
     if(params[COSI] >= 1.) params[COSI] = source->params[COSI] - jump[COSI];
 
     //safety check for distance
-    if(is_param(DIST) && (params[DIST] < 0.0 || params[DIST] > GALAXY_BS_R )) params[DIST] = source->params[DIST] - jump[DIST];
+    if(is_param(DIST) && (params[DIST] < 0.0 || params[DIST] > data->galaxy_bs_r )) params[DIST] = source->params[DIST] - jump[DIST];
     
     for(int j=0; j<NP; j++)
     {
@@ -1967,7 +1961,7 @@ double evaluate_fstatistic_proposal(struct Data *data, UNUSED struct Model *mode
 
     if(is_param(DIST) && is_param(DFDTASTRO)) {
         // Phi & costheta were handled by evaluate_sky_location_prior, this handles distance
-        logP += distance_draw_logP(params[DIST]);
+        logP += distance_draw_logP(params[DIST], data->galaxy_bs_r);
 
         // dfdt_astro uniform prior volume
         logP -= model->logPriorVolume[DFDTASTRO];
